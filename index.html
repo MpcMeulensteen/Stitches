@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stitch Pattern Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 2l12 12M14 2L2 14' stroke='%23c2185b' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app">
+  <!-- ============ TOP BAR ============ -->
+  <header id="topbar">
+    <div class="brand"><svg viewBox="0 0 16 16"><path d="M2 2l12 12M14 2L2 14"/></svg> Stitch Pattern Studio</div>
+    <input id="patternName" class="name-input" type="text" spellcheck="false" title="Pattern name">
+    <nav class="menu">
+      <button data-action="new" title="New pattern">New</button>
+      <button data-action="library" title="Open a pattern saved in this browser">Open</button>
+      <button data-action="saveFile" title="Download the project as a file">Save file</button>
+      <button data-action="openFile" title="Open a project file from disk">Load file</button>
+      <span class="sep"></span>
+      <button data-action="importImage" title="Convert a picture into a pattern">Import image</button>
+      <button data-action="exportPng" title="Export as PNG image">Export PNG</button>
+      <button data-action="print" title="Printable chart / save as PDF">Print / PDF</button>
+      <span class="sep"></span>
+      <button data-action="undo" title="Undo (Ctrl+Z)">Undo</button>
+      <button data-action="redo" title="Redo (Ctrl+Y)">Redo</button>
+      <span class="sep"></span>
+      <button data-action="settings" title="Pattern settings: size, craft, grid">Pattern settings</button>
+      <button data-action="help" title="Help and keyboard shortcuts">Help</button>
+    </nav>
+    <span id="saveState" class="save-state"></span>
+  </header>
+
+  <!-- ============ LEFT: TOOLS ============ -->
+  <aside id="leftbar">
+    <div id="toolButtons" class="tools"></div>
+    <div id="toolOptions" class="tool-options">
+
+      <section class="opt" data-for="pencil fill line rect ellipse text">
+        <h4>Stitch type</h4>
+        <div class="seg" id="stitchTypeSeg">
+          <button data-stitch="full" title="Full stitch, shown as a filled square">Full</button>
+          <button data-stitch="cross" title="Full cross stitch, shown as an ✕">✕</button>
+          <button data-stitch="half" title="Half stitch">Half</button>
+          <button data-stitch="quarter" title="Quarter stitch (quadrant under the cursor)">¼</button>
+          <button data-stitch="three" title="Three-quarter stitch (quadrant under the cursor)">¾</button>
+        </div>
+        <div class="row" id="halfDirRow">
+          <span>Half direction</span>
+          <div class="seg small" id="halfDirSeg">
+            <button data-dir="/" title="Bottom-left to top-right">/</button>
+            <button data-dir="\" title="Top-left to bottom-right">\</button>
+          </div>
+        </div>
+        <label class="check" title="Replace whatever is already in the cell (quarter stitches always add)"><input type="checkbox" id="optOverwrite"> Overwrite cell</label>
+      </section>
+
+      <section class="opt" data-for="pencil eraser line rect ellipse stamp">
+        <h4>Brush</h4>
+        <div class="row"><span>Size</span><input type="range" id="optBrushSize" min="1" max="30"><output id="optBrushSizeOut"></output></div>
+        <div class="seg" id="brushShapeSeg">
+          <button data-shape="square">Square</button>
+          <button data-shape="round">Round</button>
+        </div>
+      </section>
+
+      <section class="opt" data-for="fill">
+        <h4>Fill mode</h4>
+        <div class="seg" id="fillModeSeg">
+          <button data-fill="contig" title="Fill connected area only">Connected</button>
+          <button data-fill="global" title="Replace every matching cell">All matching</button>
+        </div>
+      </section>
+
+      <section class="opt" data-for="rect ellipse">
+        <label class="check"><input type="checkbox" id="optShapeFilled"> Filled shape</label>
+        <p class="hint">Hold Shift for a square / circle.</p>
+      </section>
+      <section class="opt" data-for="line">
+        <p class="hint">Hold Shift to snap to 45°.</p>
+      </section>
+
+      <section class="opt" data-for="eraser">
+        <h4>Erase</h4>
+        <select id="optEraserLayer">
+          <option value="all">Everything</option>
+          <option value="stitches">Stitches only</option>
+          <option value="back">Backstitches only</option>
+          <option value="knots">Knots &amp; beads only</option>
+          <option value="marks">Symbols only</option>
+        </select>
+      </section>
+
+      <section class="opt" data-for="backstitch knot">
+        <h4>Snap to</h4>
+        <div class="seg" id="snapSeg">
+          <button data-snap="half" title="Cell corners, edges and centres">Half cells</button>
+          <button data-snap="corner" title="Cell corners only">Corners</button>
+        </div>
+        <p class="hint" data-for-hint="backstitch">Drag to draw a line. Right-click removes the nearest line.</p>
+      </section>
+      <section class="opt" data-for="bead knot">
+        <p class="hint">Click to place, right-click to remove.</p>
+      </section>
+
+      <section class="opt" data-for="stamp">
+        <h4>Symbol</h4>
+        <div id="markGrid" class="mark-grid"></div>
+        <p class="hint">Right-click removes symbols.</p>
+      </section>
+
+      <section class="opt" data-for="text">
+        <h4>Text</h4>
+        <input type="text" id="optText" value="Hello" spellcheck="false">
+        <div class="row"><span>Scale</span><input type="range" id="optTextScale" min="1" max="8"><output id="optTextScaleOut"></output></div>
+        <div class="row"><span>Spacing</span><input type="range" id="optTextSpacing" min="0" max="5"><output id="optTextSpacingOut"></output></div>
+        <label class="check"><input type="checkbox" id="optTextBold"> Bold</label>
+        <p class="hint">Move over the grid to preview, click to place.</p>
+      </section>
+
+      <section class="opt" data-for="select">
+        <h4>Selection</h4>
+        <div class="btn-grid">
+          <button data-action="selectAll" title="Ctrl+A">Select all</button>
+          <button data-action="deselect" title="Esc">Deselect</button>
+          <button data-action="copy" title="Ctrl+C">Copy</button>
+          <button data-action="cut" title="Ctrl+X">Cut</button>
+          <button data-action="paste" title="Ctrl+V">Paste</button>
+          <button data-action="delete" title="Delete">Delete</button>
+          <button data-action="flipH" title="H">Flip ↔</button>
+          <button data-action="flipV" title="V">Flip ↕</button>
+          <button data-action="rotate" title="R">Rotate 90°</button>
+          <button data-action="crop" title="Crop pattern to selection">Crop</button>
+        </div>
+        <button class="wide primary" data-action="commitFloat" title="Enter">Place pasted part</button>
+        <p class="hint">Drag inside a selection to move it. Enter places, Esc cancels.</p>
+      </section>
+
+      <section class="opt" data-for="pencil eraser line rect ellipse backstitch knot bead stamp">
+        <h4>Mirror drawing</h4>
+        <select id="optSymmetry">
+          <option value="none">Off</option>
+          <option value="v">Left ↔ right</option>
+          <option value="h">Top ↕ bottom</option>
+          <option value="both">Four-way</option>
+        </select>
+      </section>
+    </div>
+  </aside>
+
+  <!-- ============ CENTER: CANVAS ============ -->
+  <main id="workspace">
+    <canvas id="canvas"></canvas>
+    <div id="zoomBox">
+      <button data-action="zoomOut" title="Zoom out (-)">−</button>
+      <span id="zoomLabel">100%</span>
+      <button data-action="zoomIn" title="Zoom in (+)">+</button>
+      <button data-action="zoomFit" title="Fit to screen (0)">Fit</button>
+    </div>
+  </main>
+
+  <!-- ============ RIGHT: PALETTE / VIEW ============ -->
+  <aside id="rightbar">
+    <section class="panel">
+      <h3>Colours</h3>
+      <button type="button" id="currentColor" class="current-color" aria-expanded="false" aria-controls="paletteDrop" title="Show / hide all colours"></button>
+      <div id="paletteDrop" class="palette-drop" hidden>
+      <div class="btn-grid">
+        <button data-action="addThread">+ Thread</button>
+        <button data-action="addCustom">+ Custom</button>
+        <button data-action="replaceColor">Replace…</button>
+        <button data-action="convertBrand">Match to brand…</button>
+        <button data-action="removeUnused">Remove unused</button>
+        <button data-action="sortPalette">Sort</button>
+      </div>
+      <div id="paletteList" class="palette-list"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>View</h3>
+      <div class="row"><span>Display</span>
+        <select id="viewMode">
+          <option value="blocks">Colour blocks</option>
+          <option value="colorsymbols">Colour + symbols</option>
+          <option value="symbols">Symbols (black &amp; white)</option>
+          <option value="realistic">Realistic stitches</option>
+        </select>
+      </div>
+      <label class="check"><input type="checkbox" id="viewGrid"> Grid lines</label>
+      <label class="check"><input type="checkbox" id="viewMajor"> Major grid lines</label>
+      <label class="check"><input type="checkbox" id="viewCenter"> Centre lines</label>
+      <label class="check"><input type="checkbox" id="viewRulers"> Rulers</label>
+      <label class="check"><input type="checkbox" id="viewBack"> Backstitches</label>
+      <label class="check"><input type="checkbox" id="viewKnots"> Knots &amp; beads</label>
+      <label class="check"><input type="checkbox" id="viewMarks"> Stitch symbols</label>
+      <label class="check"><input type="checkbox" id="viewHighlight"> Highlight current colour</label>
+    </section>
+
+    <section class="panel">
+      <h3>Pattern</h3>
+      <div id="patternInfo" class="info"></div>
+    </section>
+  </aside>
+
+  <footer id="statusbar">
+    <span id="statusPos">–</span>
+    <span id="statusSize"></span>
+    <span id="statusTool"></span>
+    <span id="statusMsg"></span>
+  </footer>
+</div>
+
+<!-- ============ DIALOGS ============ -->
+<dialog id="dlgNew" class="dlg">
+  <form method="dialog">
+    <h2>New pattern</h2>
+    <div class="form-grid">
+      <label>Name</label><input type="text" name="name" value="Untitled pattern">
+      <label>Craft</label>
+      <select name="craft" class="craft-select"></select>
+      <label>Width (stitches)</label><input type="number" name="w" min="1" max="1000" value="80">
+      <label>Height (stitches)</label><input type="number" name="h" min="1" max="1000" value="80">
+    </div>
+    <div class="craft-fields"></div>
+    <p class="finished-size hint"></p>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Create</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgSettings" class="dlg wide">
+  <form method="dialog">
+    <h2>Pattern settings</h2>
+    <div class="cols">
+      <div>
+        <h4>Size</h4>
+        <div class="form-grid">
+          <label>Width (stitches)</label><input type="number" name="w" min="1" max="1000">
+          <label>Height (stitches)</label><input type="number" name="h" min="1" max="1000">
+          <label>Grow / shrink from</label>
+          <div class="anchor-grid" id="anchorGrid"></div>
+        </div>
+        <h4>Craft</h4>
+        <div class="form-grid">
+          <label>Craft</label><select name="craft" class="craft-select"></select>
+        </div>
+        <div class="craft-fields"></div>
+        <p class="finished-size hint"></p>
+      </div>
+      <div>
+        <h4>Grid &amp; fabric</h4>
+        <div class="form-grid">
+          <label>Fabric / background</label><input type="color" name="fabricColor">
+          <label>Grid line colour</label><input type="color" name="gridColor">
+          <label>Major line colour</label><input type="color" name="majorColor">
+          <label>Major line every</label><input type="number" name="majorEvery" min="2" max="100">
+          <label>Centre line colour</label><input type="color" name="centerColor">
+          <label>Units</label><select name="units"><option value="cm">Centimetres</option><option value="in">Inches</option></select>
+        </div>
+      </div>
+    </div>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Apply</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgThreads" class="dlg wide">
+  <form method="dialog">
+    <h2>Add threads</h2>
+    <div class="row gap">
+      <select id="threadBrand"></select>
+      <input type="search" id="threadSearch" placeholder="Search number or name…">
+      <span id="threadSelCount" class="hint"></span>
+    </div>
+    <div id="threadGrid" class="thread-grid"></div>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Add selected</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgColor" class="dlg">
+  <form method="dialog">
+    <h2 class="title">Colour</h2>
+    <div class="form-grid">
+      <label>Colour</label><input type="color" name="hex">
+      <label>Name</label><input type="text" name="name">
+      <label>Brand</label><input type="text" name="brand" placeholder="e.g. DMC, or leave empty">
+      <label>Number / code</label><input type="text" name="code">
+      <label>Symbol</label><input type="text" name="symbol" maxlength="2" class="symbol-input">
+    </div>
+    <div class="symbol-pick" id="symbolPick"></div>
+    <p class="hint nearest"></p>
+    <div class="dlg-buttons">
+      <button value="nearest" type="button" class="left" data-nearest>Snap to nearest thread</button>
+      <button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgReplace" class="dlg">
+  <form method="dialog">
+    <h2>Replace colour</h2>
+    <div class="form-grid">
+      <label>Replace</label><select name="from"></select>
+      <label>With</label><select name="to"></select>
+    </div>
+    <p class="hint">All stitches, backstitches, knots and beads in the first colour get the second colour.</p>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Replace</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgConvert" class="dlg">
+  <form method="dialog">
+    <h2>Match colours to a thread brand</h2>
+    <div class="form-grid">
+      <label>Brand</label><select name="brand"></select>
+    </div>
+    <p class="hint">Every colour in the palette is replaced by the closest thread of the chosen brand. Colours that end up identical are merged.</p>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Convert</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgImport" class="dlg xwide">
+  <form method="dialog">
+    <h2>Import image</h2>
+    <div class="import-layout">
+      <div class="import-controls">
+        <input type="file" id="impFile" accept="image/*">
+        <div class="form-grid">
+          <label>Craft</label><select name="craft" class="craft-select"></select>
+          <label>Width (stitches)</label><input type="number" name="w" min="4" max="600" value="80">
+          <label>Height (stitches)</label><input type="number" name="h" min="4" max="600" value="80">
+          <label></label><label class="check"><input type="checkbox" name="lock" checked> Keep proportions</label>
+          <label>Max colours</label><input type="number" name="colors" min="2" max="128" value="20">
+          <label>Colours from</label>
+          <select name="source">
+            <option value="dmc">DMC threads</option>
+            <option value="anchor">Anchor threads</option>
+            <option value="free">Any colour</option>
+            <option value="palette">Current palette</option>
+          </select>
+          <label>Dithering</label>
+          <select name="dither"><option value="none">None (clean areas)</option><option value="fs">Floyd–Steinberg (smooth gradients)</option></select>
+          <label>Background</label>
+          <select name="bg"><option value="keep">Keep</option><option value="corner">Remove corner colour</option></select>
+          <label>Background tolerance</label><input type="range" name="bgTol" min="2" max="60" value="15">
+          <label>Brightness</label><input type="range" name="bright" min="-100" max="100" value="0">
+          <label>Contrast</label><input type="range" name="contrast" min="-100" max="100" value="0">
+          <label>Saturation</label><input type="range" name="sat" min="-100" max="100" value="0">
+          <label>Min. stitches per colour</label><input type="number" name="minCount" min="0" max="500" value="4">
+        </div>
+        <p class="hint">Transparent parts of the image stay empty. Colours used for fewer stitches than the minimum are merged into similar colours.</p>
+      </div>
+      <div class="import-previews">
+        <div><h4>Original</h4><canvas id="impOrig"></canvas></div>
+        <div><h4>Result <span id="impInfo" class="hint"></span></h4><canvas id="impResult"></canvas></div>
+      </div>
+    </div>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary" id="impApply">Create pattern</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgPng" class="dlg">
+  <form method="dialog">
+    <h2>Export PNG</h2>
+    <div class="form-grid">
+      <label>Cell size (pixels)</label><input type="number" name="cell" min="1" max="60" value="12">
+      <label>Display</label>
+      <select name="mode">
+        <option value="blocks">Colour blocks</option>
+        <option value="colorsymbols">Colour + symbols</option>
+        <option value="symbols">Symbols</option>
+        <option value="realistic">Realistic stitches</option>
+      </select>
+      <label></label><label class="check"><input type="checkbox" name="grid" checked> Grid lines</label>
+      <label></label><label class="check"><input type="checkbox" name="rulers"> Rulers / numbers</label>
+      <label></label><label class="check"><input type="checkbox" name="transparent"> Transparent background</label>
+    </div>
+    <p class="hint png-size"></p>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Download</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgPrint" class="dlg">
+  <form method="dialog">
+    <h2>Print / save as PDF</h2>
+    <div class="form-grid">
+      <label>Chart style</label>
+      <select name="mode">
+        <option value="symbols">Symbols (black &amp; white)</option>
+        <option value="colorsymbols">Colour + symbols</option>
+        <option value="blocks">Colour blocks</option>
+      </select>
+      <label>Paper</label><select name="paper"><option value="A4">A4</option><option value="Letter">Letter</option></select>
+      <label>Orientation</label><select name="orient"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select>
+      <label>Cell size on paper (mm)</label><input type="number" name="cellmm" min="1.5" max="10" step="0.1" value="3">
+      <label>Page overlap (rows)</label><input type="number" name="overlap" min="0" max="10" value="2">
+      <label></label><label class="check"><input type="checkbox" name="cover" checked> Cover page with preview</label>
+      <label></label><label class="check"><input type="checkbox" name="key" checked> Colour key</label>
+    </div>
+    <p class="hint print-info"></p>
+    <p class="hint">Your browser's print window opens. Choose <b>Save as PDF</b> as the printer to make a PDF.</p>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Print…</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgLibrary" class="dlg xwide">
+  <form method="dialog">
+    <h2>Your patterns <span class="hint">(saved in this browser)</span></h2>
+    <div id="libraryList" class="library"></div>
+    <div class="dlg-buttons"><button value="cancel">Close</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgHelp" class="dlg wide">
+  <form method="dialog">
+    <h2>Help</h2>
+    <div class="cols help">
+      <div>
+        <h4>Tools</h4>
+        <table>
+          <tr><td>P</td><td>Pencil (right-click erases, Alt-click picks colour)</td></tr>
+          <tr><td>E</td><td>Eraser</td></tr>
+          <tr><td>F</td><td>Fill</td></tr>
+          <tr><td>L / R / O</td><td>Line / rectangle / ellipse</td></tr>
+          <tr><td>I</td><td>Colour picker</td></tr>
+          <tr><td>S</td><td>Select</td></tr>
+          <tr><td>T</td><td>Text</td></tr>
+          <tr><td>B / K / D</td><td>Backstitch / French knot / bead</td></tr>
+          <tr><td>M</td><td>Knitting / crochet symbols</td></tr>
+          <tr><td>Space + drag</td><td>Pan (or middle mouse, or the hand tool)</td></tr>
+        </table>
+      </div>
+      <div>
+        <h4>Keys</h4>
+        <table>
+          <tr><td>Ctrl+Z / Ctrl+Y</td><td>Undo / redo</td></tr>
+          <tr><td>Ctrl+C / X / V</td><td>Copy / cut / paste</td></tr>
+          <tr><td>Ctrl+A</td><td>Select all</td></tr>
+          <tr><td>Delete</td><td>Clear selection</td></tr>
+          <tr><td>H / V / R</td><td>Flip / rotate the pasted part</td></tr>
+          <tr><td>Enter / Esc</td><td>Place / cancel pasted part</td></tr>
+          <tr><td>[ and ]</td><td>Brush smaller / bigger</td></tr>
+          <tr><td>X</td><td>Toggle half-stitch direction</td></tr>
+          <tr><td>1 – 9</td><td>Pick palette colour</td></tr>
+          <tr><td>Mouse wheel, + / −, 0</td><td>Zoom, fit to screen</td></tr>
+          <tr><td>Ctrl+S</td><td>Download project file</td></tr>
+        </table>
+      </div>
+    </div>
+    <p class="hint">Your work is saved automatically in this browser. Use <b>Save file</b> to keep a copy on disk or move it to another computer.</p>
+    <p class="hint">Thread colours come from the open-source <a href="https://github.com/inkstitch/inkstitch" target="_blank" rel="noopener">Ink/Stitch</a> palettes. Screen colours are approximate.</p>
+    <div class="dlg-buttons"><button value="cancel">Close</button></div>
+  </form>
+</dialog>
+
+<input type="file" id="fileOpen" accept=".json,.stitch,application/json" hidden>
+<div id="printArea"></div>
+<div id="toast"></div>
+
+<script src="js/util.js"></script>
+<script src="js/threads.js"></script>
+<script src="js/crafts.js"></script>
+<script src="js/font.js"></script>
+<script src="js/pattern.js"></script>
+<script src="js/history.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/tools.js"></script>
+<script src="js/importer.js"></script>
+<script src="js/exporter.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
