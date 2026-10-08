@@ -11,6 +11,7 @@
 <body class="counter-page">
 <header id="ctTop">
   <div class="brand"><svg viewBox="0 0 16 16"><path d="M2 2l12 12M14 2L2 14"/></svg> Stitch Counter</div>
+  <label class="profile-pick"><span aria-hidden="true">👤</span><select id="profileSelect" aria-label="Profile"></select></label>
   <a class="btn-link" href="index.html" title="Back to the pattern editor">← Pattern editor</a>
   <span class="sep"></span>
   <label class="set-pick">Project
@@ -57,6 +58,7 @@
         <option value="realistic">Realistic</option>
       </select>
       <select id="ppDone" title="How finished stitches look">
+        <option value="todo">Done in colour, rest faded</option>
         <option value="dim">Done: faded</option>
         <option value="hatch">Done: crossed out</option>
         <option value="hide">Done: hidden</option>
@@ -237,6 +239,7 @@
 <div id="confetti"></div>
 <div id="toast"></div>
 <script src="js/util.js"></script>
+<script src="js/profiles.js"></script>
 <script src="js/crafts.js"></script>
 <script src="js/pattern.js"></script>
 <script src="js/renderer.js"></script>

@@ -2,7 +2,7 @@
    plus "follow a pattern": a chart with a live position that moves one stitch per key press. */
 (function (SP) {
   const U = SP.util, $ = U.$, $$ = U.$$, Geo = SP.Geo;
-  const STORE = 'sps.counter';
+  const STORE = SP.Profiles.key('counter'); // counters / projects per profile
 
   const DEF_SETTINGS = { sound: true, targetSound: true, vibrate: true, repeat: false, tapCard: true, wake: false, size: 'm', undoKey: null };
   const PRESETS = {
@@ -16,7 +16,7 @@
     keys: { next: { code: 'Space', label: 'Space' }, back: { code: 'Backspace', label: 'Backspace' }, finish: { code: 'Enter', label: 'Enter' } },
     stitchCounter: null, groupCounter: null, resetEach: true,
     lookAhead: 3, colourSound: true, groupSound: true,
-    tool: 'jump', follow: true, focus: false, view: 'colorsymbols', doneStyle: 'dim'
+    tool: 'jump', follow: true, focus: false, view: 'colorsymbols', doneStyle: 'todo'
   };
 
   const newCounter = (o) => Object.assign({
@@ -37,12 +37,16 @@
     state = { sets: [s], current: s.id, settings: {} };
   }
   state.settings = Object.assign({}, DEF_SETTINGS, state.settings);
-  const save = U.debounce(() => { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* storage full or blocked */ } }, 250);
+  const save = U.debounce(() => {
+    if (SP.Profiles.leaving) return; // switching profiles
+    try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* storage full or blocked */ }
+  }, 250);
   const set = () => state.sets.find(s => s.id === state.current) || state.sets[0];
   const byId = id => set().counters.find(c => c.id === id);
   const normPat = (s) => {
     const p = s.pat || {};
     s.pat = Object.assign({}, DEF_PAT, p, { keys: Object.assign({}, DEF_PAT.keys, p.keys || {}) });
+    if (!s.pat.v) { s.pat.doneStyle = 'todo'; s.pat.v = 2; } // new default: finished stitches in colour
     return s.pat;
   };
   state.sets.forEach(normPat);
@@ -232,7 +236,7 @@
   const RULER = 20;
 
   const saveProgress = U.debounce(() => {
-    if (!PS.rec) return;
+    if (!PS.rec || SP.Profiles.leaving) return;
     PS.rec.pos = PS.pos;
     SP.Storage.progress.save(SP.Progress.encode(PS.rec))
       .then(() => SP.bus.post({ type: 'progress', id: PS.rec.id }))
@@ -460,7 +464,7 @@
     if (!id) return false;
     history.replaceState(null, '', location.pathname);
     const rec = await SP.Storage.get(id).catch(() => null);
-    if (!rec) return false;
+    if (!rec || (rec.profile || 'default') !== SP.Profiles.current().id) return false;
     let s = state.sets.find(x => x.pat && x.pat.patternId === id);
     if (!s && !set().pat.patternId) s = set();
     if (!s) { // current project follows another pattern: make a project for this one
@@ -1173,6 +1177,10 @@
   $('#setNotes').addEventListener('input', e => { set().notes = e.target.value; save(); });
   window.addEventListener('beforeunload', () => { save.flush(); saveProgress.flush(); });
 
+  SP.Profiles.mountPicker($('#profileSelect'), () => {
+    save.flush(); saveProgress.flush();
+    return new Promise(r => setTimeout(r, 300)); // let the progress write finish
+  });
   render(true);
   openFromUrl().then(done => { if (!done) loadPattern({ fit: true }); });
   updateWakeLock();

@@ -12,6 +12,7 @@
   <!-- ============ TOP BAR ============ -->
   <header id="topbar">
     <div class="brand"><svg viewBox="0 0 16 16"><path d="M2 2l12 12M14 2L2 14"/></svg> Stitch Pattern Studio</div>
+    <label class="profile-pick"><span aria-hidden="true">👤</span><select id="profileSelect" aria-label="Profile"></select></label>
     <input id="patternName" class="name-input" type="text" spellcheck="false" title="Pattern name">
     <nav class="menu">
       <button data-action="new" title="New pattern">New</button>
@@ -461,6 +462,7 @@
 <div id="toast"></div>
 
 <script src="js/util.js"></script>
+<script src="js/profiles.js"></script>
 <script src="js/threads.js"></script>
 <script src="js/crafts.js"></script>
 <script src="js/font.js"></script>

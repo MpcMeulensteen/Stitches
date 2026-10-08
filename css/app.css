@@ -68,6 +68,9 @@ h4 { margin: 10px 0 6px; font-size: 12px; color: var(--muted); font-weight: 600;
 .brand { font-weight: 700; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .brand svg { width: 18px; height: 18px; stroke: var(--accent); stroke-width: 3; }
 .name-input { width: 200px; font-weight: 600; }
+.profile-pick { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border-radius: 16px; background: var(--accent-soft); }
+.profile-pick select { border: none; background: transparent; font-weight: 600; max-width: 160px; cursor: pointer; padding: 2px 4px; }
+.profile-pick select option { background: var(--panel); color: var(--text); }
 .menu { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .menu .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
 .save-state { margin-left: auto; color: var(--muted); font-size: 12px; }

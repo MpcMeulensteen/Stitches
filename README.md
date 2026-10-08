@@ -22,6 +22,12 @@ Then open http://localhost:8642.
 3. `web.config` already sets `index.html` as the default document and the MIME types.
    No ASP.NET or other modules are needed. The app pool can be "No Managed Code".
 
+## Profiles
+
+Several people can use the app in the same browser: pick your name in the 👤 dropdown at the top of the editor or the counter. Each profile has its own patterns, counters, projects, stitching progress and settings. The app remembers the last profile used. The dropdown also has *New profile*, *Rename* and *Delete* (which removes everything of that profile).
+
+Profiles are not protected; they just keep your work apart. Data that existed before profiles were added belongs to the first profile.
+
 ## Where is my work saved?
 
 - Automatically, in the browser (IndexedDB). See **Open** for all saved patterns. This storage is per browser and per site address.
@@ -59,7 +65,7 @@ There are three ways to start:
 
 **Pattern & order…** changes the pattern, the stitching order and the keys.
 
-- The chart appears next to the counters. The **current stitch** is outlined, the rest of that colour run is dashed, and finished stitches fade out, get crossed out, or disappear (your choice).
+- The chart appears next to the counters. The **current stitch** is outlined, the rest of that colour run is dashed. By default finished stitches are in full colour and the rest is faded, so you see your work grow. You can switch to fading, crossing out or hiding the finished stitches instead.
 - **Next stitch / Back / Finish row** each have their own key (defaults: Space, Backspace, Enter). You can change or clear each one.
 - **Stitching orders:** rows (choose start corner, direction and back-and-forth), columns, diagonal (C2C), blocks (parking method: colour by colour per block), one colour at a time, or free. There are quick choices for knitting, knitting in the round, C2C, peyote and cross stitch.
 - Shows the colour, column / row, "row 5 of 60 · stitch 12 of 40", and **what comes next** ("3 × red → 5 × blue"). A sound and a message play when the colour changes.

@@ -46,14 +46,31 @@
       t.onerror = () => rej(t.error);
     }));
   }
+  // patterns saved before profiles existed have no profile field: they belong to the first profile
+  const profileOf = r => r.profile || 'default';
+  const curProfile = () => (SP.Profiles ? SP.Profiles.current().id : 'default');
+
   SP.Storage = {
-    save(rec) { return tx(PATTERNS, 'readwrite', st => st.put(rec)); },
+    save(rec) {
+      if (SP.Profiles && SP.Profiles.leaving) return Promise.resolve(); // switching profiles
+      rec.profile = rec.profile || curProfile();
+      return tx(PATTERNS, 'readwrite', st => st.put(rec));
+    },
     get(id) { return tx(PATTERNS, 'readonly', st => st.get(id)); },
     remove(id) { return tx(PATTERNS, 'readwrite', st => st.delete(id)).then(() => this.progress.remove(id)); },
+    /** Patterns of the current profile, newest first. */
     list() {
+      const me = curProfile();
       return tx(PATTERNS, 'readonly', st => st.getAll()).then(all =>
-        (all || []).map(r => ({ id: r.id, name: r.name, updated: r.updated, thumb: r.thumb, w: r.w, h: r.h, craft: r.craft }))
+        (all || []).filter(r => profileOf(r) === me)
+          .map(r => ({ id: r.id, name: r.name, updated: r.updated, thumb: r.thumb, w: r.w, h: r.h, craft: r.craft }))
           .sort((a, b) => b.updated - a.updated));
+    },
+    /** Delete every pattern (and its progress) of a profile. */
+    removeProfileData(pid) {
+      return tx(PATTERNS, 'readonly', st => st.getAll()).then(async all => {
+        for (const r of (all || []).filter(r => profileOf(r) === pid)) await this.remove(r.id);
+      });
     },
     progress: {
       get(id) { return tx(PROGRESS, 'readonly', st => st.get(id)); },
@@ -61,10 +78,14 @@
       remove(id) { return tx(PROGRESS, 'readwrite', st => st.delete(id)); }
     },
     prefs: {
+      // per profile (see profiles.js)
       get(key, def) {
-        try { const v = localStorage.getItem('sps.' + key); return v == null ? def : JSON.parse(v); } catch (e) { return def; }
+        try { const v = localStorage.getItem(SP.Profiles.key(key)); return v == null ? def : JSON.parse(v); } catch (e) { return def; }
       },
-      set(key, v) { try { localStorage.setItem('sps.' + key, JSON.stringify(v)); } catch (e) { /* ignore */ } }
+      set(key, v) {
+        if (SP.Profiles.leaving) return;
+        try { localStorage.setItem(SP.Profiles.key(key), JSON.stringify(v)); } catch (e) { /* ignore */ }
+      }
     }
   };
 

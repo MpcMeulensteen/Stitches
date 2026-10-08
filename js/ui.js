@@ -15,6 +15,8 @@
         const v = e.target.value.trim() || 'Untitled pattern';
         app.begin('Rename'); app.pattern.touch(); app.pattern.name = v; app.commit();
       });
+      // profile switch: save the open pattern first, then the page reloads in the other profile
+      SP.Profiles.mountPicker($('#profileSelect'), () => { if (app.floating) app.commitFloat(); return app.saveNow(); });
       $('#currentColor').addEventListener('click', () => this.setPaletteOpen($('#paletteDrop').hidden));
       this.setPaletteOpen(SP.Storage.prefs.get('paletteOpen', false));
       // make sure the counter reads the latest version of this pattern

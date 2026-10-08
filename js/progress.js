@@ -175,19 +175,25 @@
   };
 
   /** Draw finished stitches. style: 'dim' | 'hatch' | 'hide' */
+  /**
+   * Show progress on a chart.
+   * style 'todo': finished stitches in full colour, stitches still to do faded.
+   * style 'dim' | 'hatch' | 'hide': finished stitches faded / crossed out / hidden.
+   */
   P.drawDone = (ctx, p, g, rec, style, width, height) => {
     if (!rec) return;
     const L = p.legs, D = rec.done, fab = p.settings.fabricColor;
+    const todo = style === 'todo';
     const vx0 = Math.max(0, Math.floor(-g.ox / g.cw) - 1), vx1 = Math.min(p.w, Math.ceil((width - g.ox) / g.cw) + 1);
     const vy0 = Math.max(0, Math.floor(-g.oy / g.ch) - 1), vy1 = Math.min(p.h, Math.ceil((height - g.oy) / g.ch) + 1);
     ctx.save();
     ctx.fillStyle = fab;
-    ctx.globalAlpha = style === 'hide' ? 1 : style === 'hatch' ? 0.45 : 0.72;
+    ctx.globalAlpha = style === 'hide' ? 1 : style === 'hatch' ? 0.45 : todo ? 0.7 : 0.72;
     const hatch = style === 'hatch' && Math.min(g.cw, g.ch) >= 6;
     const hp = hatch ? new Path2D() : null;
     for (let y = vy0; y < vy1; y++) for (let x = vx0; x < vx1; x++) {
       const i = y * p.w + x;
-      if (!D[i]) continue;
+      if (!D[i] !== todo) continue; // fade either the finished or the unfinished stitches
       const b = i * 4;
       if (!(L[b] | L[b + 1] | L[b + 2] | L[b + 3])) continue;
       const xy = Geo.cellXY(g, x, y);
@@ -195,18 +201,18 @@
       if (hp) { hp.moveTo(xy[0] + 1, xy[1] + g.ch - 1); hp.lineTo(xy[0] + g.cw - 1, xy[1] + 1); }
     }
     if (hp) { ctx.globalAlpha = 0.8; ctx.strokeStyle = U.contrastColor(fab) === '#000000' ? '#555' : '#ddd'; ctx.lineWidth = 1.2; ctx.stroke(hp); }
-    // finished backstitches / knots / beads: draw a light line over them
-    if (rec.vec.size) {
+    // backstitches / knots / beads: draw a light line over the faded ones
+    if (rec.vec.size || todo) {
       ctx.globalAlpha = 0.75; ctx.strokeStyle = fab; ctx.lineCap = 'round';
       ctx.lineWidth = Math.max(2, Math.min(g.cw, g.ch) * 0.2);
       for (const l of p.lines) {
-        if (!rec.vec.has(P.vecKey('l', l))) continue;
+        if (rec.vec.has(P.vecKey('l', l)) === todo) continue;
         const a = Geo.halfXY(g, l.x1, l.y1), c = Geo.halfXY(g, l.x2, l.y2);
         ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); ctx.stroke();
       }
       ctx.fillStyle = fab;
       for (const [t, arr] of [['k', p.knots], ['b', p.beads]]) for (const k of arr) {
-        if (!rec.vec.has(P.vecKey(t, k))) continue;
+        if (rec.vec.has(P.vecKey(t, k)) === todo) continue;
         const a = Geo.halfXY(g, k.x, k.y);
         ctx.beginPath(); ctx.arc(a[0], a[1], Math.max(2.5, Math.min(g.cw, g.ch) * 0.36), 0, Math.PI * 2); ctx.fill();
       }
