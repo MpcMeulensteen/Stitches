@@ -9,7 +9,7 @@
     eraserLayer: 'all', symmetry: 'none', mark: 1, snap: 'half',
     text: 'Hello', textScale: 1, textSpacing: 1, textBold: false
   };
-  const DEFAULT_VIEW = { mode: 'blocks', grid: true, major: true, center: true, rulers: true, back: true, knots: true, marks: true, highlight: false };
+  const DEFAULT_VIEW = { mode: 'blocks', grid: true, major: true, center: true, rulers: true, back: true, knots: true, marks: true, highlight: false, progress: true };
 
   const STARTER = [['310', 'dmc'], ['White', 'dmc'], ['321', 'dmc'], ['740', 'dmc'], ['444', 'dmc'], ['699', 'dmc'], ['797', 'dmc'], ['208', 'dmc'], ['3865', 'dmc'], ['801', 'dmc']];
 
@@ -40,14 +40,21 @@
       this.resizeCanvas();
 
       const lastId = SP.Storage.prefs.get('lastId', null);
-      const start = lastId ? SP.Storage.get(lastId).catch(() => null) : Promise.resolve(null);
+      let storageError = null;
+      const start = lastId ? SP.Storage.get(lastId).catch(err => { storageError = err; return null; }) : Promise.resolve(null);
       start.then(rec => {
         if (rec && rec.data) {
           try { const p = SP.Pattern.fromJSON(rec.data); p.id = rec.id; this.setPattern(p, true); return; } catch (e) { console.error(e); }
         }
-        this.setPattern(this.makePattern({ name: 'My first pattern', w: 60, h: 60, settings: {} }), false);
+        this.setPattern(this.makePattern({ name: storageError ? 'Untitled pattern' : 'My first pattern', w: 60, h: 60, settings: {} }), !!storageError);
+        if (storageError) {
+          SP.Storage.prefs.set('lastId', lastId); // keep pointing at your real pattern for the next reload
+          SP.UI.setSaveState('Saved patterns could not be opened');
+          alert('Your saved patterns could not be opened right now:\n\n' + storageError.message + '\n\nAn empty pattern is shown for now. Nothing has been lost.');
+        }
       });
       window.addEventListener('beforeunload', () => { if (this.dirty) this.autosave.flush(); });
+      SP.bus.on(msg => { if (msg && msg.type === 'progress' && this.pattern && msg.id === this.pattern.id) this.loadProgress(); });
     },
 
     makePattern(o) {
@@ -70,6 +77,19 @@
       SP.UI.refreshAll();
       if (!loaded) this.saveNow();
       else SP.Storage.prefs.set('lastId', p.id);
+      this.loadProgress();
+    },
+
+    /** Stitching progress from the counter page (read-only here). */
+    loadProgress() {
+      const p = this.pattern;
+      this.progress = null;
+      if (!p || !p.id) return;
+      SP.Storage.progress.get(p.id).then(rec => {
+        if (p !== this.pattern) return;
+        this.progress = rec && rec.w === p.w && rec.h === p.h ? SP.Progress.decode(rec) : null;
+        this.refreshInfo(); this.render();
+      }).catch(() => {});
     },
 
     // ================= state helpers =================
@@ -161,19 +181,23 @@
     },
     saveNow() {
       const p = this.pattern;
-      if (!p) return;
+      if (!p) return Promise.resolve();
       if (!p.id) p.id = U.uid();
       const rec = {
         id: p.id, name: p.name, updated: Date.now(), w: p.w, h: p.h, craft: p.settings.craft,
         thumb: SP.Exporter.thumbnail(p, 180), data: p.toJSON()
       };
-      SP.Storage.save(rec).then(() => {
+      return SP.Storage.save(rec).then(() => {
         this.dirty = false;
         SP.Storage.prefs.set('lastId', p.id);
         SP.UI.setSaveState('Saved in browser ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        SP.bus.post({ type: 'pattern', id: p.id }); // an open counter page reloads the pattern
+        if (this.progress && (this.progress.w !== p.w || this.progress.h !== p.h)) { this.progress = null; this.refreshInfo(); }
       }).catch(err => {
         console.error(err);
-        SP.UI.setSaveState('Could not save in browser – use Save file');
+        SP.UI.setSaveState(/locked by another tab/.test(err.message)
+          ? 'Not saved: close other tabs of this app and reload'
+          : 'Could not save in browser – use Save file');
       });
     },
     saveFile() {
@@ -222,6 +246,9 @@
       const o = Object.assign(this.renderOpts(), { width: this.cssW, height: this.cssH, bg, rulers: false });
       R.render(ctx, this.pattern, this.geo, o);
       const tool = SP.Tools[this.state.tool];
+      if (this.viewOpts.progress && this.progress && this.progress.w === this.pattern.w && this.progress.h === this.pattern.h) {
+        SP.Progress.drawDone(ctx, this.pattern, this.geo, this.progress, 'dim', this.cssW, this.cssH);
+      }
       if (tool && tool.overlay) tool.overlay(this, ctx, this.geo);
       if (this.state.tool !== 'select' && (this.floating || this.selection)) SP.Tools.select.overlay(this, ctx, this.geo);
       if (this.viewOpts.rulers) {
@@ -532,6 +559,11 @@
       if (tot.back) lines.push(`Backstitch: ${p.lines.length} lines (${tot.back.toFixed(1)} ${craft.unit === 'stitches' ? 'cells' : ''} long)`);
       if (tot.knots) lines.push(`French knots: ${tot.knots}`);
       if (tot.beads) lines.push(`Beads: ${tot.beads}`);
+      if (this.progress && this.progress.w === p.w && this.progress.h === p.h) {
+        const ps = SP.Progress.stats(p, this.progress);
+        const pct = ps.done / Math.max(1, ps.total) * 100;
+        if (ps.done) lines.push(`<b>Stitched:</b> ${ps.done} of ${ps.total} (${pct < 10 ? pct.toFixed(1) : Math.floor(pct)}%)`);
+      }
       if (this.selection) lines.push(`<b>Selection:</b> ${this.selection.w} × ${this.selection.h} at ${this.selection.x + 1}, ${this.selection.y + 1}`);
       if (this.floating) lines.push(`<b>Pasted part:</b> ${this.floating.clip.w} × ${this.floating.clip.h} (Enter to place)`);
       $('#patternInfo').innerHTML = lines.join('<br>');

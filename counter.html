@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stitch Counter</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext x='8' y='13' font-size='13' text-anchor='middle' fill='%23c2185b' font-family='Arial' font-weight='bold'%3E%23%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/counter.css">
+</head>
+<body class="counter-page">
+<header id="ctTop">
+  <div class="brand"><svg viewBox="0 0 16 16"><path d="M2 2l12 12M14 2L2 14"/></svg> Stitch Counter</div>
+  <a class="btn-link" href="index.html" title="Back to the pattern editor">← Pattern editor</a>
+  <span class="sep"></span>
+  <label class="set-pick">Project
+    <select id="setSelect" title="Each project has its own counters"></select>
+  </label>
+  <button data-act="newSet" title="New project with its own counters">New project</button>
+  <button data-act="renameSet">Rename</button>
+  <button data-act="deleteSet">Delete</button>
+  <span class="sep"></span>
+  <button data-act="pattern" class="primary" title="Choose the pattern, stitching order and keys">Pattern &amp; order…</button>
+  <button data-act="addCounter">+ Counter</button>
+  <button data-act="undo" title="Undo last count (Ctrl+Z)">Undo</button>
+  <button data-act="resetAll" title="Reset every counter in this project">Reset all</button>
+  <button data-act="settings">Settings</button>
+  <button data-act="fullscreen" title="Full screen (F11)">Full screen</button>
+</header>
+
+<main id="ctMain">
+  <section id="patternEmpty" class="ct-box pe" hidden>
+    <h2>Follow a pattern while you stitch</h2>
+    <p>Pick one of your patterns. You'll see the chart with your current stitch; every press of <span class="kbd">Space</span> moves one stitch further and marks it done, so you always see how far you are.</p>
+    <div id="peList" class="pe-list"></div>
+    <div class="pe-actions">
+      <button type="button" class="primary" data-act="importPattern">Import pattern file…</button>
+      <a class="btn-link" href="index.html">Open the pattern editor</a>
+      <span class="hint">Or just use the counters below without a pattern.</span>
+    </div>
+  </section>
+
+  <section id="patternPane" class="pp" hidden>
+    <div class="pp-tools">
+      <div class="seg" id="ppTool" title="What a click on the chart does">
+        <button data-tool="jump" title="Click a stitch to continue from there">Jump here</button>
+        <button data-tool="mark" title="Click or drag to mark stitches (and backstitches, knots, beads) as done">Mark done</button>
+        <button data-tool="unmark" title="Click or drag to mark stitches as not done">Unmark</button>
+        <button data-tool="pan" title="Drag to move the view (right mouse button always does this)">Move view</button>
+      </div>
+      <label class="check" title="Keep the current stitch in view"><input type="checkbox" id="ppFollow"> Follow</label>
+      <label class="check" title="Darken everything except the current row / block"><input type="checkbox" id="ppFocus"> Focus</label>
+      <select id="ppView" title="Chart style">
+        <option value="blocks">Colour blocks</option>
+        <option value="colorsymbols">Colour + symbols</option>
+        <option value="symbols">Symbols</option>
+        <option value="realistic">Realistic</option>
+      </select>
+      <select id="ppDone" title="How finished stitches look">
+        <option value="dim">Done: faded</option>
+        <option value="hatch">Done: crossed out</option>
+        <option value="hide">Done: hidden</option>
+      </select>
+      <span class="pp-zoom">
+        <button id="ppZoomOut" title="Zoom out">−</button><button id="ppZoomIn" title="Zoom in">+</button>
+        <button id="ppFit" title="Whole pattern">Fit</button><button id="ppFind" title="Show the current stitch">Find</button>
+      </span>
+    </div>
+    <div class="pp-canvas"><canvas id="ppCanvas"></canvas><div id="ppBanner" class="pp-banner" hidden></div></div>
+  </section>
+
+  <section id="patternStatus" class="ct-box ps" hidden>
+    <div class="ps-head"><b id="psName"></b><span id="psOrder" class="hint"></span></div>
+    <div id="psCurrent" class="ps-current"></div>
+    <div id="psGroup" class="ps-group"></div>
+    <div id="psAhead" class="ps-ahead"></div>
+    <div class="ps-btns">
+      <button data-pact="back" title="Undo the last stitch">← Back</button>
+      <button data-pact="next" class="plus" title="This stitch is done">Next stitch</button>
+      <button data-pact="finish" id="psFinishBtn" title="The rest of this row is done">Finish row</button>
+    </div>
+    <div id="psKeys" class="ct-keys"></div>
+    <div class="ct-bar ps-bar"><div id="psBar"></div></div>
+    <div id="psTotals" class="ps-totals"></div>
+    <details id="psColours"><summary>Progress per colour</summary><div id="psColourList" class="ps-colours"></div></details>
+  </section>
+
+  <div id="counters" class="counters"></div>
+  <section class="ct-side">
+    <div class="ct-box">
+      <h3>Session</h3>
+      <div id="sessionInfo" class="info"></div>
+      <button data-act="resetSession" class="wide">Restart session timer</button>
+    </div>
+    <div class="ct-box">
+      <h3>Notes</h3>
+      <textarea id="setNotes" rows="6" placeholder="Notes for this project, e.g. needle size, where you left off…"></textarea>
+    </div>
+    <div class="ct-box">
+      <h3>History</h3>
+      <ol id="historyList" class="history"></ol>
+    </div>
+  </section>
+</main>
+
+<footer id="ctFoot"><span id="keyHint"></span><span id="ctMsg"></span></footer>
+
+<!-- Counter settings -->
+<dialog id="dlgCounter" class="dlg wide">
+  <form method="dialog">
+    <h2 class="title">Counter</h2>
+    <div class="cols">
+      <div class="form-grid">
+        <label>Name</label><input type="text" name="name" maxlength="40">
+        <label>Colour</label><input type="color" name="color">
+        <label>Count by (step)</label><input type="number" name="step" min="1" max="1000" value="1">
+        <label>Start / reset value</label><input type="number" name="start" value="0">
+        <label>Lowest value</label><input type="number" name="min" value="0">
+        <label>Target</label><input type="number" name="target" min="1" placeholder="none">
+        <label>When target is reached</label>
+        <select name="onTarget">
+          <option value="notify">Signal and keep counting</option>
+          <option value="stop">Signal and stop at the target</option>
+          <option value="rollover">Signal, reset, and add to another counter</option>
+        </select>
+        <label class="roll-row">Add to counter</label>
+        <select name="linkTo" class="roll-row"></select>
+      </div>
+      <div>
+        <h4>Keyboard</h4>
+        <div class="key-row">
+          <span>Count up</span>
+          <button type="button" class="key-cap" data-capture="keyUp"></button>
+          <button type="button" data-clear="keyUp" title="No key">✕</button>
+        </div>
+        <div class="key-row">
+          <span>Count down</span>
+          <button type="button" class="key-cap" data-capture="keyDown"></button>
+          <button type="button" data-clear="keyDown" title="No key">✕</button>
+        </div>
+        <p class="hint key-warn"></p>
+        <p class="hint">Click a key button, then press the key you want to use. Any key works, including Space, Enter, arrows, number pad keys, and USB foot pedals or clickers that act like a keyboard.</p>
+        <h4>Presets</h4>
+        <div class="btn-grid">
+          <button type="button" data-preset="stitches">Stitches</button>
+          <button type="button" data-preset="rows">Rows</button>
+          <button type="button" data-preset="repeats">Repeats</button>
+          <button type="button" data-preset="rounds">Rounds</button>
+        </div>
+      </div>
+    </div>
+    <div class="dlg-buttons">
+      <button type="button" class="left danger" data-delete-counter>Delete counter</button>
+      <button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgCtSettings" class="dlg">
+  <form method="dialog">
+    <h2>Counter settings</h2>
+    <label class="check"><input type="checkbox" name="sound"> Click sound on every count</label>
+    <label class="check"><input type="checkbox" name="targetSound"> Sound when a target is reached</label>
+    <label class="check"><input type="checkbox" name="vibrate"> Vibrate (phones and tablets)</label>
+    <label class="check"><input type="checkbox" name="repeat"> Keep counting while a key is held down</label>
+    <label class="check"><input type="checkbox" name="tapCard"> Tap / click a counter to count up</label>
+    <label class="check"><input type="checkbox" name="wake"> Keep the screen on while this page is open</label>
+    <div class="form-grid" style="margin-top:8px">
+      <label>Undo key</label>
+      <div class="key-row"><button type="button" class="key-cap" data-capture-global="undoKey"></button><button type="button" data-clear-global="undoKey">✕</button></div>
+      <label>Counter size</label>
+      <select name="size"><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select>
+    </div>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Save</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlgPattern" class="dlg xwide">
+  <form method="dialog">
+    <h2>Follow a pattern</h2>
+    <div class="cols3">
+      <div>
+        <h4>Pattern</h4>
+        <div id="patList" class="pat-list"></div>
+        <p class="hint">Patterns you made or imported in the editor (saved in this browser).</p>
+        <button type="button" data-act="importPattern">Import pattern file…</button>
+      </div>
+      <div>
+        <h4>Stitching order</h4>
+        <div class="form-grid">
+          <label>Quick choice</label><select name="preset"></select>
+          <label>Order</label><select name="mode"></select>
+          <label data-modes="rows columns">Start at</label>
+          <select name="startY" data-modes="rows columns"><option value="top">Top</option><option value="bottom">Bottom</option></select>
+          <label data-modes="rows columns">First stitch on the</label>
+          <select name="startX" data-modes="rows columns"><option value="left">Left</option><option value="right">Right</option></select>
+          <label data-modes="diagonal">Start corner</label>
+          <select name="corner" data-modes="diagonal"><option value="bl">Bottom left</option><option value="br">Bottom right</option><option value="tl">Top left</option><option value="tr">Top right</option></select>
+          <label data-modes="rows columns diagonal"></label>
+          <label class="check" data-modes="rows columns diagonal"><input type="checkbox" name="snake"> Back and forth (turn at the end)</label>
+          <label data-modes="blocks">Block size</label>
+          <input type="number" name="block" min="2" max="100" data-modes="blocks">
+          <label data-modes="blocks">Inside a block</label>
+          <select name="inBlock" data-modes="blocks"><option value="colour">One colour at a time</option><option value="rows">Row by row</option></select>
+          <label data-modes="blocks"></label>
+          <label class="check" data-modes="blocks"><input type="checkbox" name="blockSnake"> Blocks back and forth</label>
+        </div>
+        <p class="hint order-info"></p>
+      </div>
+      <div>
+        <h4>Keys</h4>
+        <div class="key-row"><span>Next stitch</span><button type="button" class="key-cap" data-pkey="next"></button><button type="button" data-pclear="next">✕</button></div>
+        <div class="key-row"><span>Back one</span><button type="button" class="key-cap" data-pkey="back"></button><button type="button" data-pclear="back">✕</button></div>
+        <div class="key-row"><span class="finish-word">Finish row</span><button type="button" class="key-cap" data-pkey="finish"></button><button type="button" data-pclear="finish">✕</button></div>
+        <p class="hint">These keys win over counters with the same key.</p>
+        <h4>Also count on a counter</h4>
+        <div class="form-grid narrow">
+          <label>Each stitch</label><select name="stitchCounter"></select>
+          <label class="finish-each">Each finished row</label><select name="groupCounter"></select>
+        </div>
+        <label class="check"><input type="checkbox" name="resetEach"> Stitch counter starts again at each new row / block</label>
+        <h4>Signals</h4>
+        <label class="check"><input type="checkbox" name="colourSound"> Sound + message when the colour changes</label>
+        <label class="check"><input type="checkbox" name="groupSound"> Sound when a row / block is finished</label>
+        <div class="form-grid narrow"><label>Look ahead</label><select name="lookAhead"><option>2</option><option>3</option><option>4</option><option>6</option></select></div>
+      </div>
+    </div>
+    <div class="dlg-buttons">
+      <button type="button" class="left danger" data-unlink>Stop following</button>
+      <button type="button" class="danger" data-reset-progress>Reset progress…</button>
+      <button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Start / save</button>
+    </div>
+  </form>
+</dialog>
+
+<input type="file" id="patFile" accept=".json,.stitch,application/json" hidden>
+<div id="confetti"></div>
+<div id="toast"></div>
+<script src="js/util.js"></script>
+<script src="js/crafts.js"></script>
+<script src="js/pattern.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/exporter.js"></script>
+<script src="js/progress.js"></script>
+<script src="js/counter.js"></script>
+</body>
+</html>

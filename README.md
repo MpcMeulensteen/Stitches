@@ -40,6 +40,34 @@ Then open http://localhost:8642.
 
 Press **Help** in the app for all keyboard shortcuts.
 
+## Stitch counter (`counter.html`)
+
+A separate page for counting while you stitch. Open it from the **Counter** button in the editor, or go straight to `counter.html`.
+
+- Any number of counters (stitches, rows, repeats, rounds, …), each with its own name, colour and step size, and its own **keyboard key for counting up and down**. Any key works, including USB foot pedals or clickers that act as a keyboard.
+- **Targets:** signal and keep counting, stop at the target, or **roll over**: reset and add 1 to another counter (for example 40 stitches → +1 row).
+- Undo (Ctrl+Z or your own key), history log, session timer with counting speed, notes.
+- **Projects:** each project has its own set of counters.
+- Settings: click sound, target sound, vibration, hold a key to keep counting, tap a card to count, keep the screen on, counter size, full screen.
+- Everything is saved in the browser.
+
+### Following a pattern
+There are three ways to start:
+- In the editor, click **Stitch it ▸ Counter**. The counter opens with that pattern already loaded.
+- On the counter page, click one of your patterns in the **Follow a pattern** panel.
+- On the counter page, click **Import pattern file…** and choose a `.stitch.json` file (for example from the `samples` folder).
+
+**Pattern & order…** changes the pattern, the stitching order and the keys.
+
+- The chart appears next to the counters. The **current stitch** is outlined, the rest of that colour run is dashed, and finished stitches fade out, get crossed out, or disappear (your choice).
+- **Next stitch / Back / Finish row** each have their own key (defaults: Space, Backspace, Enter). You can change or clear each one.
+- **Stitching orders:** rows (choose start corner, direction and back-and-forth), columns, diagonal (C2C), blocks (parking method: colour by colour per block), one colour at a time, or free. There are quick choices for knitting, knitting in the round, C2C, peyote and cross stitch.
+- Shows the colour, column / row, "row 5 of 60 · stitch 12 of 40", and **what comes next** ("3 × red → 5 × blue"). A sound and a message play when the colour changes.
+- Counters can **count along**: +1 per stitch, +1 per finished row / block, and the stitch counter can start again at each row.
+- Chart tools: *Jump here*, *Mark done* / *Unmark* (click or drag; backstitches, knots and beads are ticked off the same way), *Move view*, *Focus* (darkens everything except the current row / block), *Follow*, zoom.
+- Progress: % done, progress per colour, speed and estimated time left, and confetti when you finish.
+- Progress is saved per pattern. In the editor, **View → Stitching progress** fades finished stitches, and the Pattern panel shows "% stitched". Both pages update each other live when they're open in two tabs.
+
 ## Project layout
 
 ```

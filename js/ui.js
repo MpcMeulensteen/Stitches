@@ -17,6 +17,13 @@
       });
       $('#currentColor').addEventListener('click', () => this.setPaletteOpen($('#paletteDrop').hidden));
       this.setPaletteOpen(SP.Storage.prefs.get('paletteOpen', false));
+      // make sure the counter reads the latest version of this pattern
+      $('#counterLink').addEventListener('click', e => {
+        e.preventDefault();
+        const go = () => { location.href = $('#counterLink').href; };
+        if (app.floating) app.commitFloat();
+        app.saveNow().then(go, go);
+      });
       $('#fileOpen').addEventListener('change', e => {
         const f = e.target.files[0];
         if (f) app.loadFile(f);
@@ -27,6 +34,7 @@
     refreshAll() {
       const p = app.pattern;
       $('#patternName').value = p.name;
+      $('#counterLink').href = 'counter.html?pattern=' + encodeURIComponent(p.id || '');
       this.refreshTools();
       this.refreshPalette();
       this.refreshUndo();
@@ -144,7 +152,7 @@
     // ================= view =================
     bindView() {
       const v = app.viewOpts;
-      const map = { viewGrid: 'grid', viewMajor: 'major', viewCenter: 'center', viewRulers: 'rulers', viewBack: 'back', viewKnots: 'knots', viewMarks: 'marks', viewHighlight: 'highlight' };
+      const map = { viewGrid: 'grid', viewMajor: 'major', viewCenter: 'center', viewRulers: 'rulers', viewBack: 'back', viewKnots: 'knots', viewMarks: 'marks', viewHighlight: 'highlight', viewProgress: 'progress' };
       for (const id in map) {
         const el = $('#' + id);
         el.checked = !!v[map[id]];
@@ -187,7 +195,13 @@
         const b = e.target.closest('[data-action]');
         if (!b || b.closest('dialog')) return;
         const f = A[b.dataset.action];
-        if (f) { f(); b.blur(); }
+        if (!f) return;
+        b.blur();
+        if (!app.pattern && !['new', 'library', 'openFile', 'help'].includes(b.dataset.action)) {
+          app.toast('No pattern is open yet. Use New or Open.');
+          return;
+        }
+        f();
       });
     },
 
@@ -356,9 +370,10 @@
 
     dlgNew() {
       const d = $('#dlgNew'), f = d.querySelector('form');
-      const settings = Object.assign(SP.defaultSettings(), { units: app.pattern.settings.units });
+      const cur = app.pattern ? app.pattern.settings : SP.defaultSettings();
+      const settings = Object.assign(SP.defaultSettings(), { units: cur.units });
       const sel = f.querySelector('.craft-select');
-      this.fillCraftSelect(sel, app.pattern.settings.craft);
+      this.fillCraftSelect(sel, cur.craft);
       settings.craft = sel.value;
       let read;
       const upd = () => {

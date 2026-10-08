@@ -28,6 +28,8 @@
       <span class="sep"></span>
       <button data-action="settings" title="Pattern settings: size, craft, grid">Pattern settings</button>
       <button data-action="help" title="Help and keyboard shortcuts">Help</button>
+      <span class="sep"></span>
+      <a class="btn-link primary" id="counterLink" href="counter.html" title="Start stitching this pattern: opens the counter with this pattern">Stitch it ▸ Counter</a>
     </nav>
     <span id="saveState" class="save-state"></span>
   </header>
@@ -196,6 +198,7 @@
       <label class="check"><input type="checkbox" id="viewKnots"> Knots &amp; beads</label>
       <label class="check"><input type="checkbox" id="viewMarks"> Stitch symbols</label>
       <label class="check"><input type="checkbox" id="viewHighlight"> Highlight current colour</label>
+      <label class="check" title="Fade the stitches you marked as done in the counter"><input type="checkbox" id="viewProgress"> Stitching progress</label>
     </section>
 
     <section class="panel">
@@ -468,6 +471,7 @@
 <script src="js/importer.js"></script>
 <script src="js/exporter.js"></script>
 <script src="js/storage.js"></script>
+<script src="js/progress.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/app.js"></script>
 </body>
