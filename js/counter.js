@@ -4,7 +4,7 @@
   const U = SP.util, $ = U.$, $$ = U.$$, Geo = SP.Geo;
   const STORE = SP.Profiles.key('counter'); // counters / projects per profile
 
-  const DEF_SETTINGS = { sound: true, targetSound: true, vibrate: true, repeat: false, tapCard: true, wake: false, size: 'm', undoKey: null };
+  const DEF_SETTINGS = { sound: true, targetSound: true, vibrate: true, repeat: false, tapCard: true, wake: false, size: 'm', undoKey: null, pauseKey: { code: 'KeyP', label: 'P' } };
   const PRESETS = {
     stitches: { name: 'Stitches', color: '#c2185b', keyUp: { code: 'Space', label: 'Space' } },
     rows: { name: 'Rows', color: '#1565c0', keyUp: { code: 'Enter', label: 'Enter' } },
@@ -53,6 +53,128 @@
 
   const undoStack = [];
   const session = { start: Date.now(), counts: 0 };
+
+  // ---------------- stitching sessions (time record) ----------------
+  // The record lives with what you are counting: the followed pattern's progress, or else the project.
+  // A session runs from Start (or your first stitch) and only counts time while it is not paused.
+  const T = { id: null, key: null, hostObj: null, running: false, segStart: 0, acc: 0, start: 0, base: 0 };
+  const timeHost = () => PS.rec || set();
+  // which pattern / project the session belongs to (the pattern object is reloaded when the editor saves it)
+  const hostKey = () => (PS.rec ? 'p:' + PS.rec.id : 's:' + set().id);
+  const hostTime = () => { const h = timeHost(); if (!h.time || !Array.isArray(h.time.sessions)) h.time = { sessions: [] }; return h.time; };
+  const doneNow = () => (PS.rec && PS.p ? SP.Progress.stats(PS.p, PS.rec, PS.seq.col).done : session.counts);
+  const sessionMs = () => T.acc + (T.running ? Date.now() - T.segStart : 0);
+  // The running session is also kept in localStorage (synchronous, so it survives going to the
+  // editor and back, a reload, or closing the tab). The page picks it up again when it opens.
+  const LIVE = SP.Profiles.key('counterSession');
+  function persistLive() {
+    if (SP.Profiles.leaving) return;
+    try {
+      if (!T.id) { localStorage.removeItem(LIVE); return; }
+      localStorage.setItem(LIVE, JSON.stringify({ id: T.id, key: T.key, start: T.start, base: T.base, acc: T.acc,
+        running: T.running, segStart: T.segStart, counts: session.counts, savedAt: Date.now() }));
+    } catch (e) { /* storage full or blocked */ }
+  }
+  /** Write the current session into the record (updated in place while it runs). */
+  function writeSession() {
+    if (!T.id || T.key !== hostKey()) return;
+    const t = hostTime();
+    let e = t.sessions.find(x => x.id === T.id);
+    if (!e) { e = { id: T.id, start: T.start }; t.sessions.push(e); if (t.sessions.length > 1000) t.sessions.shift(); }
+    e.end = Date.now(); e.ms = Math.round(sessionMs()); e.stitches = Math.max(0, doneNow() - T.base);
+    T.hostObj = timeHost();
+    if (PS.rec) saveProgress(); else save();
+    persistLive();
+  }
+  function startSession() {
+    if (T.running) return;
+    if (T.id && T.key !== hostKey()) endSession();
+    const resumed = !!T.id;
+    if (!T.id) { T.id = U.uid(); T.key = hostKey(); T.start = Date.now(); T.base = doneNow(); T.acc = 0; }
+    T.running = true; T.segStart = Date.now();
+    writeSession(); renderSession(); persistLive();
+    toast(resumed ? 'Session resumed.' : 'Session started. The time is kept with this ' + (PS.rec ? 'pattern.' : 'project.'));
+  }
+  function pauseSession(quiet) {
+    if (!T.running) return;
+    T.acc += Date.now() - T.segStart; T.running = false;
+    writeSession(); renderSession(); persistLive();
+    if (!quiet) toast('Session paused at ' + SP.Progress.fmtDuration(T.acc, true) + '. Press Resume (or a stitch key) to go on.');
+  }
+  /** Close the session for good (another pattern / project, or leaving the page). */
+  function endSession() {
+    if (!T.id) return;
+    if (T.running) { T.acc += Date.now() - T.segStart; T.running = false; }
+    if (T.key === hostKey()) writeSession();
+    else if (T.hostObj) { // already switched to something else: finish the entry on the old one
+      const e = ((T.hostObj.time || {}).sessions || []).find(x => x.id === T.id);
+      if (e) { e.ms = Math.round(T.acc); e.end = Date.now(); }
+      if (T.key[0] === 'p' && T.hostObj.done) SP.Storage.progress.save(SP.Progress.encode(T.hostObj)).catch(() => {});
+    }
+    saveProgress.flush(); save.flush();
+    T.id = null; T.key = null; T.hostObj = null; T.acc = 0;
+    persistLive();
+    renderSession();
+  }
+  /** Totals of the record with the running session counted up to this moment. */
+  function liveTotals(time) {
+    const tot = SP.Progress.timeTotals(time);
+    const e = T.id && T.key === hostKey() && time && time.sessions.find(x => x.id === T.id);
+    if (T.id && T.key === hostKey()) {
+      tot.ms += sessionMs() - (e ? e.ms || 0 : 0);
+      tot.stitches += Math.max(0, doneNow() - T.base) - (e ? e.stitches || 0 : 0);
+      if (!e || e.ms < 1000) tot.count += sessionMs() >= 1000 ? 1 : 0;
+    }
+    return tot;
+  }
+  const toggleSession = () => (T.running ? pauseSession() : startSession());
+  setInterval(() => { if (T.running) writeSession(); }, 10000);
+  setInterval(() => { if (T.running) persistLive(); }, 2000);
+
+  /**
+   * After the page opens: continue the session that was going on (e.g. you went to the editor and back).
+   * A running session continues when the page was gone for less than 30 minutes; after a longer
+   * absence it is paused at the moment the page was left, so that time is not counted.
+   */
+  async function restoreSession() {
+    let L = null;
+    try { L = JSON.parse(localStorage.getItem(LIVE)); } catch (e) { L = null; }
+    if (!L || !L.id) return;
+    const now = Date.now(), away = now - (L.savedAt || now);
+    let acc = L.acc || 0, running = !!L.running;
+    if (running && away > 30 * 60 * 1000) { acc += Math.max(0, L.savedAt - L.segStart); running = false; }
+    if (L.key !== hostKey()) { // it belongs to another pattern / project: finish it there
+      await finishElsewhere(L, running ? acc + (now - L.segStart) : acc);
+      try { localStorage.removeItem(LIVE); } catch (e) { /* ignore */ }
+      return;
+    }
+    Object.assign(T, { id: L.id, key: L.key, start: L.start, base: L.base, acc, running, segStart: running ? L.segStart : 0, hostObj: timeHost() });
+    if (!PS.rec && typeof L.counts === 'number') session.counts = Math.max(session.counts, L.counts);
+    writeSession(); renderSession();
+    if (running) toast('Session continues: ' + SP.Progress.fmtDuration(sessionMs(), true) + ' so far.');
+    else toast('Your session is paused at ' + SP.Progress.fmtDuration(acc, true) + '. Press Resume (or a stitch key) to go on.');
+  }
+  async function finishElsewhere(L, ms) {
+    try {
+      if (L.key.startsWith('p:')) {
+        const r = await SP.Storage.progress.get(L.key.slice(2));
+        if (!r) return;
+        const t = r.time || (r.time = { sessions: [] });
+        let e = (t.sessions || []).find(x => x.id === L.id);
+        if (!e) { e = { id: L.id, start: L.start, stitches: 0 }; t.sessions.push(e); }
+        e.ms = Math.round(ms); e.end = L.savedAt || Date.now();
+        await SP.Storage.progress.save(r);
+      } else {
+        const st = state.sets.find(x => 's:' + x.id === L.key);
+        if (!st) return;
+        const t = st.time || (st.time = { sessions: [] });
+        let e = t.sessions.find(x => x.id === L.id);
+        if (!e) { e = { id: L.id, start: L.start, stitches: 0 }; t.sessions.push(e); }
+        e.ms = Math.round(ms); e.end = L.savedAt || Date.now();
+        save();
+      }
+    } catch (err) { /* keep going */ }
+  }
 
   // ---------------- feedback ----------------
   let actx = null;
@@ -111,6 +233,7 @@
 
   /** Change counter c by one step up (+1) or down (-1). */
   function count(c, dir) {
+    if (dir > 0 && !T.running) startSession();
     snapshot(c.name);
     const signals = [];
     apply(c, dir, 0, signals);
@@ -161,10 +284,20 @@
       PS.pos = e.pat.pos;
       PS.celebrated = false;
       saveProgress();
+      if (!switched && s.pat.follow) ensureVisible();
     } else session.counts = Math.max(0, session.counts - 1);
     save();
     if (switched) loadPattern(); else render(true);
     toast('Undone: ' + e.label);
+  }
+  /** Start the followed pattern again: no stitches done, back to the first stitch. Undo brings it all back. */
+  function resetPatternProgress(label) {
+    const D = PS.rec.done, cells = [], old = [];
+    for (let i = 0; i < D.length; i++) if (D[i]) { cells.push(i); old.push(D[i]); }
+    snapshot(label, { cells, old, vec: Array.from(PS.rec.vec, k => [k, true]), pos: PS.pos });
+    D.fill(0); PS.rec.vec.clear();
+    PS.pos = nextPos(0); PS.celebrated = false;
+    PS.rec.started = Date.now();
   }
   function resetCounter(c) {
     snapshot(c.name + ' reset');
@@ -201,6 +334,11 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const s = set();
+    if (state.settings.pauseKey && state.settings.pauseKey.code === e.code) {
+      e.preventDefault();
+      if (!e.repeat) toggleSession();
+      return;
+    }
     if (state.settings.undoKey && state.settings.undoKey.code === e.code) {
       e.preventDefault();
       if (!e.repeat || state.settings.repeat) undo();
@@ -245,6 +383,9 @@
 
   async function loadPattern(opts) {
     opts = opts || {};
+    // switching to another pattern / project closes the session (a reload of the same pattern does not)
+    const s0 = set(), nextKey = s0.pat && s0.pat.patternId ? 'p:' + s0.pat.patternId : 's:' + s0.id;
+    if (T.id && T.key !== nextKey) endSession();
     const s = set(), cfg = s.pat;
     if (!cfg || !cfg.patternId) { PS.p = PS.rec = PS.seq = null; layout(); render(true); return; }
     try {
@@ -261,6 +402,11 @@
         else { cfg.patternId = null; save(); PS.p = PS.rec = PS.seq = null; layout(); render(true); return; }
       }
       const same = PS.p && PS.p.id === p.id;
+      // keep the running session's entry when this is a reload of the same pattern
+      if (same && T.id && PS.rec && PS.rec.time && prog && prog.time) {
+        const live = PS.rec.time.sessions.find(x => x.id === T.id);
+        if (live && !prog.time.sessions.some(x => x.id === T.id)) prog.time.sessions.push(live);
+      }
       if (!prog) prog = SP.Progress.newRecord(p, opts.order);
       else if (opts.order) prog.order = SP.Progress.normOrder(opts.order);
       PS.p = p; PS.rec = prog;
@@ -299,6 +445,10 @@
     for (let k = seq.gStart[g]; k < seq.gEnd[g]; k++) if (!D[seq.steps[k]]) return false;
     return true;
   }
+  /** Row / column numbers counted from the side chosen in the editor (View → Row & column numbers). */
+  const numbering = () => { const v = SP.Storage.prefs.get('view', {}) || {}; return { flipX: v.colsFrom === 'right', flipY: v.rowsFrom === 'bottom', show: v.rulers !== false }; };
+  const colNo = x => (numbering().flipX ? PS.p.w - x : x + 1);
+  const rowNo = y => (numbering().flipY ? PS.p.h - y : y + 1);
   const word = () => (PS.seq ? PS.seq.word : 'row');
   const shortWord = () => ({ 'colour in this block': 'colour' }[word()] || word());
   const colorLabel = e => (e ? (e.brand ? `${e.brand} ${e.code}` : e.hex) + (e.name ? ' ' + e.name : '') : '');
@@ -311,6 +461,7 @@
     if (!len) { toast('This pattern has no stitches.'); return; }
     if (kind === 'next' || kind === 'finish') {
       if (PS.pos >= len) { toast('Everything is done! 🎉'); return; }
+      if (!T.running) startSession();
       const k0 = PS.pos, g = seq.groups[k0];
       const cells = [];
       if (kind === 'next') cells.push(S[k0]);
@@ -321,13 +472,26 @@
       PS.pos = nextPos(kind === 'next' ? k0 + 1 : seq.gEnd[g]);
       afterDone(cells.length, g, wasComplete, cells[cells.length - 1]);
     } else if (kind === 'back') {
+      // the last thing done on this pattern (stitch, finish row, jump, mark): undo it exactly,
+      // so the stitches, the position on the chart and the linked counters all go back together
+      const top = undoStack[undoStack.length - 1];
+      if (top && top.pat && top.pat.id === PS.rec.id && top.setId === set().id) { undo(); return; }
+      // no history (e.g. after a reload): un-mark the previous stitch and correct the counters
       let j = Math.min(PS.pos, len) - 1;
       while (j >= 0 && !D[S[j]]) j--;
       if (j < 0) { toast('Nothing to go back to.'); return; }
+      const g = seq.groups[j], wasComplete = groupDone(g);
       snapshot('Back', { cells: [S[j]], old: [1], pos: PS.pos });
       D[S[j]] = 0; PS.pos = j; PS.celebrated = false;
-      const c = cfg.stitchCounter && byId(cfg.stitchCounter);
-      if (c) apply(c, -1, 0, []);
+      const sc = cfg.stitchCounter && byId(cfg.stitchCounter), gc = cfg.groupCounter && byId(cfg.groupCounter);
+      if (gc && wasComplete) apply(gc, -1, 0, []);
+      if (sc && sc !== gc) {
+        if (cfg.resetEach && wasComplete) { // the counter was reset when this row was finished: count it again
+          let n = 0;
+          for (let k = seq.gStart[g]; k < seq.gEnd[g]; k++) if (D[S[k]]) n++;
+          sc.value = sc.start + n;
+        } else apply(sc, -1, 0, []);
+      }
       clickSound();
       commitPattern();
     }
@@ -444,7 +608,8 @@
       p.id = U.uid();
       const rec = { id: p.id, name: p.name, updated: Date.now(), w: p.w, h: p.h, craft: p.settings.craft,
         thumb: SP.Exporter.thumbnail(p, 180), data: p.toJSON() };
-      return SP.Storage.save(rec).then(() => {
+      const json = JSON.parse(txt), st = SP.Progress.fromFile(json, p);
+      return SP.Storage.save(rec).then(() => (st ? SP.Storage.progress.save(st) : null)).then(() => {
         const d = $('#dlgPattern');
         if (d.open) closeDialog(d);
         toast(`Imported "${p.name}". It is also in the pattern editor under Open.`);
@@ -527,6 +692,7 @@
     const accent = css.getPropertyValue('--accent').trim() || '#c2185b';
     SP.Renderer.render(ctx, p, g, {
       width: W, height: H, mode: cfg.view, grid: true, major: true, center: false, rulers: false,
+      flipX: numbering().flipX, flipY: numbering().flipY, // thick lines every 10 from where the numbering starts
       back: true, knots: true, marks: true, highlight: -1, bg: css.getPropertyValue('--workspace').trim() || '#d9d5d0'
     });
     SP.Progress.drawDone(ctx, p, g, PS.rec, cfg.doneStyle, W, H);
@@ -560,12 +726,17 @@
       }
       ctx.restore();
     }
-    const vx0 = Math.max(0, Math.floor(-g.ox / g.cw) - 1), vx1 = Math.min(p.w, Math.ceil((W - g.ox) / g.cw) + 1);
-    const vy0 = Math.max(0, Math.floor(-g.oy / g.ch) - 1), vy1 = Math.min(p.h, Math.ceil((H - g.oy) / g.ch) + 1);
-    SP.Renderer.drawRulers(ctx, p, g, {
-      width: W, height: H, rulerSize: RULER,
-      rulerBg: css.getPropertyValue('--panel').trim(), rulerText: css.getPropertyValue('--muted').trim()
-    }, vx0, vx1, vy0, vy1, 0, 0, p.w, p.h);
+    // row and column numbers next to the grid (as in the editor); highlights the hovered or current stitch
+    const nb = numbering();
+    if (nb.show) {
+      let hl = PS.hover && p.inside(PS.hover.x, PS.hover.y) ? PS.hover : null;
+      if (!hl && seq.order.mode !== 'free' && PS.pos < S.length) hl = { x: S[PS.pos] % p.w, y: (S[PS.pos] / p.w) | 0 };
+      SP.Renderer.drawGridNumbers(ctx, p, g, {
+        width: W, height: H, flipX: nb.flipX, flipY: nb.flipY, hover: hl,
+        bg: css.getPropertyValue('--panel').trim() || '#ffffff', text: css.getPropertyValue('--text').trim() || '#333',
+        line: css.getPropertyValue('--border').trim() || '#c9c5c0', accent
+      });
+    }
   }
   function focusOverlay(ctx, g, gi, W, H) {
     const seq = PS.seq, info = seq.info[gi], p = PS.p;
@@ -611,7 +782,7 @@
     const p = PS.p, P = PS.paint;
     if (!p.inside(cell.x, cell.y)) return;
     const i = cell.y * p.w + cell.x;
-    if (PS.seq.col[i] < 0 || PS.rec.done[i] === P.val) return;
+    if ((PS.seq.col[i] < 0 && !PS.seq.blank) || PS.rec.done[i] === P.val) return;
     P.entry.pat.cells.push(i); P.entry.pat.old.push(PS.rec.done[i]);
     PS.rec.done[i] = P.val;
     P.changed++;
@@ -649,9 +820,12 @@
     paintCell(c);
     requestDraw();
   });
+  PS.canvas.addEventListener('pointerleave', () => { if (PS.hover) { PS.hover = null; requestDraw(); } });
   PS.canvas.addEventListener('pointermove', e => {
     if (!PS.p) return;
     const pt = chartPoint(e);
+    const hv = PS.p.inside(pt.cell.x, pt.cell.y) ? { x: pt.cell.x, y: pt.cell.y } : null;
+    if ((hv && (!PS.hover || hv.x !== PS.hover.x || hv.y !== PS.hover.y)) || (!hv && PS.hover)) { PS.hover = hv; requestDraw(); }
     if (PS.pan) {
       PS.view.ox = PS.pan.ox + pt.sx - PS.pan.sx; PS.view.oy = PS.pan.oy + pt.sy - PS.pan.sy;
       requestDraw(); return;
@@ -708,8 +882,31 @@
     if (b) { patAction(b.dataset.pact); b.blur(); }
   });
 
+  /** Start corner of the current order: 'tl' | 'tr' | 'bl' | 'br' (null when the order has no corner). */
+  function startCorner() {
+    const o = PS.rec && PS.rec.order;
+    if (!o) return null;
+    if (o.mode === 'rows' || o.mode === 'columns') return (o.startY === 'bottom' ? 'b' : 't') + (o.startX === 'right' ? 'r' : 'l');
+    if (o.mode === 'diagonal') return o.corner;
+    return null;
+  }
+  $('#ppStart').addEventListener('change', e => {
+    const v = e.target.value; e.target.blur();
+    if (!PS.p || !PS.rec || startCorner() === v) return;
+    saveProgress.flush();
+    const o = Object.assign({}, PS.rec.order, { startY: v[0] === 'b' ? 'bottom' : 'top', startX: v[1] === 'r' ? 'right' : 'left', corner: v });
+    PS.rec.order = SP.Progress.normOrder(o);
+    PS.seq = SP.Progress.build(PS.p, PS.rec.order);
+    PS.pos = nextPos(0); PS.celebrated = false;
+    undoStack.length = 0; // positions of the old order no longer apply
+    saveProgress(); save(); ensureVisible(true); render(true);
+    toast('Starting at the ' + e.target.selectedOptions[0].textContent.toLowerCase() + '. Stitches you already did stay done.');
+  });
   function renderPatternTools() {
     const cfg = set().pat;
+    const sc = startCorner();
+    $('#ppStartWrap').hidden = !sc;
+    if (sc) $('#ppStart').value = sc;
     $$('#ppTool [data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === cfg.tool));
     $('#ppFollow').checked = cfg.follow; $('#ppFocus').checked = cfg.focus;
     $('#ppView').value = cfg.view; $('#ppDone').value = cfg.doneStyle;
@@ -739,19 +936,34 @@
       cur = '<b>All stitches are done 🎉</b>';
     } else {
       const i = S[PS.pos], c = seq.col[i], e = p.palette[c];
-      cur = `${swatch(e, 'sw')}<span class="t"><b>${U.esc(colorLabel(e))}</b><span>Column ${i % p.w + 1}, row ${((i / p.w) | 0) + 1}</span></span>`;
+      const where = `Column ${colNo(i % p.w)}, row ${rowNo((i / p.w) | 0)}`;
+      cur = seq.blank
+        ? `<span class="t"><b>Stitch ${PS.pos + 1} of ${len}</b><span>${where} <span class="hint">(empty grid: every square counts)</span></span></span>`
+        : `${swatch(e, 'sw')}<span class="t"><b>${U.esc(colorLabel(e))}</b><span>${where}</span></span>`;
       const g = seq.groups[PS.pos], info = seq.info[g];
+      const g0 = S[seq.gStart[g]];
+      const chart = seq.order.mode === 'rows' ? `chart row ${rowNo((g0 / p.w) | 0)}` : seq.order.mode === 'columns' ? `chart column ${colNo(g0 % p.w)}` : info.chart;
       let gDone = 0;
       for (let k = seq.gStart[g]; k < seq.gEnd[g]; k++) if (D[S[k]]) gDone++;
       const gTot = seq.gEnd[g] - seq.gStart[g];
-      const of = seq.order.mode === 'blocks' ? '' : ` of ${seq.groupCount}`;
-      grp = `<b>${U.esc(info.name)}</b>${of}${info.chart ? ` <span class="hint">(${info.chart})</span>` : ''} ${info.dir || ''}` +
-        (info.colour != null && seq.order.mode === 'blocks' ? ` · ${swatch(p.palette[info.colour], 'mini')} ${U.esc(colorLabel(p.palette[info.colour]))}` : '') +
-        `<br>Stitch <b>${gDone + 1}</b> of ${gTot} in this ${word()}`;
-      // look-ahead: runs of the same colour
+      // two big tiles: where you are in this row, and which row
+      const mode = seq.order.mode;
+      const GW = { rows: 'Row', columns: 'Column', diagonal: 'Diagonal', blocks: 'Block', colours: 'Colour' }[mode] || 'Row';
+      let gNum = g + 1, gOf = seq.groupCount;
+      const bm = mode === 'blocks' && info.name.match(/(\d+) of (\d+)/);
+      if (bm) { gNum = +bm[1]; gOf = +bm[2]; }
+      const left = gTot - gDone;
+      const colourLine = info.colour != null && mode === 'blocks' ? ` · ${swatch(p.palette[info.colour], 'mini')} ${U.esc(colorLabel(p.palette[info.colour]))}` : '';
+      grp = `<div class="ps-tiles">
+          <div class="ps-tile"><span class="lbl">Stitch in this ${U.esc(shortWord())} ${info.dir || ''}</span>
+            <span class="big">${gDone + 1}<small>/${gTot}</small></span><span class="sub">${left} to go${colourLine}</span></div>
+          <div class="ps-tile"><span class="lbl">${GW}</span>
+            <span class="big">${gNum}<small>/${gOf}</small></span><span class="sub">${chart ? U.esc(chart) : '&nbsp;'}</span></div>
+        </div>`;
+      // look-ahead: runs of the same colour, one line for this row and one for the next
       const runs = [];
       let lastG = g;
-      for (let k = PS.pos; k < len && runs.length <= cfg.lookAhead; k++) {
+      for (let k = PS.pos; k < len && runs.length <= cfg.lookAhead && !seq.blank; k++) {
         const ci = S[k];
         if (D[ci]) continue;
         const col = seq.col[ci], brk = seq.groups[k] !== lastG;
@@ -760,8 +972,15 @@
         if (r && r.c === col && !brk) r.n++;
         else { if (runs.length === cfg.lookAhead) break; runs.push({ c: col, n: 1, brk }); }
       }
-      ahead = runs.map((r, idx) => (r.brk ? `<span class="brk">next ${shortWord()}:</span> ` : idx ? '→ ' : '') +
-        `<span class="run${idx === 0 ? ' first' : ''}">${r.n} × ${swatch(p.palette[r.c], 'mini')} ${U.esc(p.palette[r.c] ? (p.palette[r.c].code || p.palette[r.c].name || '') : '')}</span>`).join(' ');
+      const lines = [];
+      runs.forEach((r, idx) => {
+        if (!idx || r.brk) lines.push({ label: !idx ? 'This ' + shortWord() : lines.length === 1 ? 'Next ' + shortWord() : 'Then', runs: [] });
+        lines[lines.length - 1].runs.push({ r, first: idx === 0 });
+      });
+      ahead = lines.map(l => `<div class="ah-line"><span class="ah-lbl">${U.esc(l.label)}</span>` +
+        l.runs.map(({ r, first }, j) => (j ? '<span class="ah-arrow">→</span>' : '') +
+          `<span class="run${first ? ' first' : ''}"><b>${r.n}</b> × ${swatch(p.palette[r.c], 'mini')} ${U.esc(p.palette[r.c] ? (p.palette[r.c].code || p.palette[r.c].name || p.palette[r.c].hex) : '')}</span>`).join('') +
+        '</div>').join('');
     }
     $('#psCurrent').innerHTML = cur;
     $('#psGroup').innerHTML = grp;
@@ -774,8 +993,10 @@
     $('#psBar').style.width = pct + '%';
     const lines = [`<b>${st.done.toLocaleString()}</b> of ${st.total.toLocaleString()} stitches done (<b>${pct < 10 && pct > 0 ? pct.toFixed(1) : Math.floor(pct)}%</b>)`];
     if (st.vecTotal) lines.push(`Backstitches, knots &amp; beads: ${st.vecDone} of ${st.vecTotal} <span class="hint">(tick off with Mark done)</span>`);
-    if (PS.steps >= 5 && PS.active > 20000) {
-      const perMs = PS.steps / PS.active;
+    const tt = liveTotals(PS.rec.time);
+    if (tt.ms >= 1000) lines.push(`Stitching time: <b>${SP.Progress.fmtDuration(tt.ms)}</b> in ${tt.count} session${tt.count === 1 ? '' : 's'}`);
+    if (tt.stitches >= 5 && tt.ms > 20000) {
+      const perMs = tt.stitches / tt.ms;
       lines.push(`Speed: <b>${Math.round(perMs * 3600000)}</b> stitches per hour`);
       if (st.total > st.done) lines.push(`Time left: about <b>${fmtDuration((st.total - st.done) / perMs)}</b>`);
     }
@@ -830,6 +1051,7 @@
     const pk = PS.p ? Object.values(s.pat.keys).filter(Boolean).map(k => k.code) : [];
     s.counters.filter(c => c.keyUp && !pk.includes(c.keyUp.code)).forEach(c => keys.push(`${kbd(c.keyUp)} ${U.esc(c.name)}`));
     if (state.settings.undoKey) keys.push(`${kbd(state.settings.undoKey)} undo`);
+    if (state.settings.pauseKey) keys.push(`${kbd(state.settings.pauseKey)} pause / resume`);
     $('#keyHint').innerHTML = keys.length ? 'Keys: ' + keys.join(' · ') + ' · Ctrl+Z undo' : 'Tip: give a counter a keyboard key in its ⚙ settings.';
     $('#historyList').innerHTML = s.log.slice(-60).reverse().map(l =>
       `<li><span>${new Date(l.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span> ${l.text}</li>`).join('') || '<li>No counts yet.</li>';
@@ -838,12 +1060,28 @@
     if (PS.p) { renderPatternTools(); renderPatternStatus(); requestDraw(); }
   }
   function renderSession() {
-    const sec = Math.floor((Date.now() - session.start) / 1000);
-    const hh = Math.floor(sec / 3600), mm = Math.floor(sec / 60) % 60, ss = sec % 60;
-    const rate = sec > 30 ? Math.round(session.counts / (sec / 3600)) : null;
-    $('#sessionInfo').innerHTML =
-      `Time: <b>${hh}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}</b><br>` +
-      `Counted up: <b>${session.counts}</b>` + (rate != null ? `<br>Speed: <b>${rate}</b> per hour` : '');
+    const ms = T.id && T.key === hostKey() ? sessionMs() : 0;
+    $('#sessClock').textContent = SP.Progress.fmtDuration(ms, true);
+    const st = $('#sessState');
+    st.textContent = T.running ? 'running' : T.id ? 'paused' : 'not started';
+    st.className = 'sess-state' + (T.running ? ' on' : T.id ? ' paused' : '');
+    const btn = $('#sessBtn'), pk = state.settings.pauseKey ? ` (${state.settings.pauseKey.label})` : '';
+    btn.textContent = (T.running ? '⏸ Pause' : T.id ? '▶ Resume' : '▶ Start') + pk;
+    btn.classList.toggle('running', T.running);
+    const stitches = T.id ? Math.max(0, doneNow() - T.base) : 0;
+    const what = PS.rec ? 'stitches' : 'counts';
+    const rate = ms > 30000 && stitches ? Math.round(stitches / (ms / 3600000)) : null;
+    const t = hostTime(), tot = liveTotals(t);
+    $('#sessTotal').textContent = SP.Progress.fmtDuration(tot.ms, true); // all sessions of this pattern, ticking along
+    $('#sessTotalLbl').textContent = 'Total · ' + (PS.rec ? 'pattern' : 'project');
+    const lines = [`This session: <b>${stitches}</b> ${what}` + (rate != null ? ` · <b>${rate}</b> per hour` : '')];
+    lines.push(`Total: <b>${tot.count}</b> session${tot.count === 1 ? '' : 's'}, <b>${tot.stitches}</b> ${what}` +
+      (tot.ms > 60000 && tot.stitches ? ` · ${Math.round(tot.stitches / (tot.ms / 3600000))} per hour` : ''));
+    $('#sessionInfo').innerHTML = lines.join('<br>');
+    const fmtT = d => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const list = t.sessions.filter(x => x.ms >= 1000).slice().reverse();
+    $('#sessList').innerHTML = list.map(x => `<li><span>${new Date(x.start).toLocaleDateString()} ${fmtT(x.start)}–${fmtT(x.end || x.start)}</span>` +
+      `<span><b>${SP.Progress.fmtDuration(x.id === T.id ? sessionMs() : x.ms)}</b> · ${x.id === T.id ? Math.max(0, doneNow() - T.base) : x.stitches || 0} sts${x.id === T.id ? ' (now)' : ''}</span></li>`).join('') || '<li>No sessions yet.</li>';
   }
   setInterval(renderSession, 1000);
 
@@ -977,10 +1215,16 @@
     const showKey = () => { capBtn.innerHTML = undoKey ? kbd(undoKey) : '<span class="hint">click to set</span>'; };
     capBtn.onclick = () => startCapture(capBtn, k => { undoKey = k; showKey(); });
     $('[data-clear-global]', d).onclick = () => { undoKey = null; showKey(); };
+    let pauseKey = st.pauseKey;
+    const pBtn = $('[data-capture-pause]', d);
+    const showPause = () => { pBtn.innerHTML = pauseKey ? kbd(pauseKey) : '<span class="hint">click to set</span>'; };
+    pBtn.onclick = () => startCapture(pBtn, k => { pauseKey = k; showPause(); });
+    $('[data-clear-pause]', d).onclick = () => { pauseKey = null; showPause(); };
+    showPause();
     showKey();
     openDialog(d, () => {
       ['sound', 'targetSound', 'vibrate', 'repeat', 'tapCard', 'wake'].forEach(k => { st[k] = f[k].checked; });
-      st.size = f.size.value; st.undoKey = undoKey;
+      st.size = f.size.value; st.undoKey = undoKey; st.pauseKey = pauseKey;
       save(); render(); updateWakeLock();
     });
   }
@@ -1026,7 +1270,8 @@
     const readOrder = () => {
       order = SP.Progress.normOrder({
         mode: f.mode.value, startY: f.startY.value, startX: f.startX.value, corner: f.corner.value, snake: f.snake.checked,
-        block: U.clamp(+f.block.value || 10, 2, 100), inBlock: f.inBlock.value, blockSnake: f.blockSnake.checked
+        block: U.clamp(+f.block.value || 10, 2, 100), inBlock: f.inBlock.value, blockSnake: f.blockSnake.checked,
+        chosen: f.mode.value === 'blocks'
       });
       showModes();
     };
@@ -1037,7 +1282,7 @@
       $('.finish-each', d).textContent = f.mode.value === 'blocks' && f.inBlock.value === 'colour' ? 'Each finished colour in a block' : `Each finished ${w || 'row'}`;
       $('.order-info', d).textContent = order ? SP.Progress.describe(order) + '.' : '';
     };
-    f.preset.onchange = () => { const pr = SP.Progress.PRESETS[f.preset.value]; if (pr) { order = SP.Progress.normOrder(pr.order); fillOrder(); } };
+    f.preset.onchange = () => { const pr = SP.Progress.PRESETS[f.preset.value]; if (pr) { order = SP.Progress.normOrder(Object.assign({ chosen: pr.order.mode === 'blocks' }, pr.order)); fillOrder(); } };
     ['mode', 'startY', 'startX', 'corner', 'snake', 'block', 'inBlock', 'blockSnake'].forEach(n => { f[n].onchange = () => { f.preset.value = ''; readOrder(); }; });
     f.preset.value = '';
     fillOrder();
@@ -1068,15 +1313,19 @@
     };
     $('[data-reset-progress]', d).onclick = () => {
       if (!selId) { toast('Choose a pattern first.'); return; }
+      if (PS.p && PS.p.id === selId) { // the pattern you follow now: reset in place (undoable)
+        if (!confirm('Reset all stitching progress for this pattern? (Ctrl+Z undoes this.)')) return;
+        resetPatternProgress('Reset progress');
+        [s.pat.stitchCounter, s.pat.groupCounter].map(byId).filter(Boolean).forEach(c => { c.value = c.start; });
+        log('<b>Pattern progress</b> reset');
+        saveProgress(); save();
+        closeDialog(d);
+        ensureVisible(true); render(true);
+        toast('Progress reset. Starting again from the first stitch.');
+        return;
+      }
       if (!confirm('Reset all stitching progress for this pattern? This cannot be undone.')) return;
       SP.Storage.progress.remove(selId).then(() => {
-        if (PS.p && PS.p.id === selId) {
-          PS.rec = SP.Progress.newRecord(PS.p, order);
-          PS.seq = SP.Progress.build(PS.p, PS.rec.order);
-          PS.pos = nextPos(0); PS.celebrated = false;
-          undoStack.length = 0;
-          saveProgress(); render();
-        }
         SP.bus.post({ type: 'progress', id: selId });
         toast('Progress reset.');
       });
@@ -1128,13 +1377,19 @@
     settings: openSettings,
     resetAll: () => {
       const s = set();
-      if (!s.counters.length || !confirm(`Reset all counters in "${s.name}"? (Pattern progress is not changed.)`)) return;
-      snapshot('Reset all');
+      const pat = PS.p && PS.rec && s.pat.patternId === PS.p.id;
+      if (!s.counters.length && !pat) return;
+      if (!confirm(pat
+        ? `Start "${PS.p.name}" again?\n\nAll counters go back to their start value and every stitch is marked as not done. (Ctrl+Z undoes this.)`
+        : `Reset all counters in "${s.name}"?`)) return;
+      if (pat) resetPatternProgress('Reset all'); else snapshot('Reset all');
       s.counters.forEach(c => { c.value = c.start; });
-      log('<b>All counters</b> reset');
-      save(); render();
+      log(pat ? '<b>All counters and pattern progress</b> reset' : '<b>All counters</b> reset');
+      if (pat) { saveProgress(); ensureVisible(true); }
+      save(); render(true);
+      toast(pat ? 'Started again from the first stitch.' : 'All counters reset.');
     },
-    resetSession: () => { session.start = Date.now(); session.counts = 0; PS.active = 0; PS.steps = 0; PS.last = 0; render(); },
+    toggleSession,
     fullscreen: () => {
       if (document.fullscreenElement) document.exitFullscreen();
       else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
@@ -1175,13 +1430,17 @@
     loadPattern({ fit: true });
   });
   $('#setNotes').addEventListener('input', e => { set().notes = e.target.value; save(); });
-  window.addEventListener('beforeunload', () => { save.flush(); saveProgress.flush(); });
+  const storeAll = () => { if (T.id) writeSession(); persistLive(); save.flush(); saveProgress.flush(); };
+  window.addEventListener('beforeunload', storeAll);
+  window.addEventListener('pagehide', storeAll);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') storeAll(); });
+  window.addEventListener('storage', e => { if (PS.p && e.key && /view$/.test(e.key)) render(); });
 
   SP.Profiles.mountPicker($('#profileSelect'), () => {
     save.flush(); saveProgress.flush();
     return new Promise(r => setTimeout(r, 300)); // let the progress write finish
   });
   render(true);
-  openFromUrl().then(done => { if (!done) loadPattern({ fit: true }); });
+  openFromUrl().then(done => (done ? null : loadPattern({ fit: true }))).then(restoreSession);
   updateWakeLock();
 })(window.SP);

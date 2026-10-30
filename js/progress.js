@@ -18,6 +18,7 @@
     ['free', 'Free (mark cells yourself)']
   ];
   P.PRESETS = {
+    zigzag: { label: 'Rows back and forth (zigzag), from the top-left', order: { mode: 'rows', startY: 'top', startX: 'left', snake: true } },
     reading: { label: 'Rows, top-left to right', order: { mode: 'rows', startY: 'top', startX: 'left', snake: false } },
     knitFlat: { label: 'Knitting / crochet flat (back and forth from bottom-right)', order: { mode: 'rows', startY: 'bottom', startX: 'right', snake: true } },
     knitRound: { label: 'Knitting in the round (every row right to left)', order: { mode: 'rows', startY: 'bottom', startX: 'right', snake: false } },
@@ -27,14 +28,18 @@
     colours: { label: 'Cross stitch: one colour at a time', order: { mode: 'colours' } },
     free: { label: 'Free: mark cells yourself', order: { mode: 'free' } }
   };
-  const BASE = { mode: 'rows', startY: 'top', startX: 'left', snake: false, corner: 'bl', block: 10, inBlock: 'colour', blockSnake: false };
+  const BASE = { mode: 'rows', startY: 'top', startX: 'left', snake: true, corner: 'bl', block: 10, inBlock: 'colour', blockSnake: false };
   P.normOrder = o => Object.assign({}, BASE, o || {});
+  /** Default: zigzag row by row (knitting / crochet flat start bottom-right, peyote goes by columns). */
   P.defaultOrder = (settings) => {
     const c = settings.craft;
-    const pre = c === 'knit' || c === 'crochet' ? 'knitFlat' : c === 'cross' ? 'parking'
-      : c === 'bead' && settings.beadLayout === 'peyote' ? 'peyote' : 'reading';
+    const pre = c === 'knit' || c === 'crochet' ? 'knitFlat'
+      : c === 'bead' && settings.beadLayout === 'peyote' ? 'peyote' : 'zigzag';
     return P.normOrder(P.PRESETS[pre].order);
   };
+  /** Progress saved with the old cross-stitch default (10×10 blocks) switches to zigzag rows,
+      unless blocks were picked on purpose in the order dialog (chosen: true). */
+  const migrateOrder = o => (o && o.mode === 'blocks' && !o.chosen ? Object.assign({}, o, P.PRESETS.zigzag.order) : o);
   P.GROUP_WORD = { rows: 'row', columns: 'column', diagonal: 'diagonal', blocks: 'block', colours: 'colour', free: '' };
 
   P.cellColors = (p) => {
@@ -52,24 +57,33 @@
    * steps[k] = cell index of the k-th stitch, groups[k] = its group (row, block run, ...).
    */
   P.build = (p, order) => {
-    const o = P.normOrder(order);
+    let o = P.normOrder(order);
     const w = p.w, h = p.h, n = w * h;
     const col = P.cellColors(p);
+    // an empty pattern (blank grid): every cell is a stitch to count, row by row
+    const blank = !col.some(v => v >= 0);
+    if (blank && o.mode === 'colours') o = Object.assign({}, o, { mode: 'rows' });
+    if (blank && o.mode === 'blocks' && o.inBlock === 'colour') o = Object.assign({}, o, { inBlock: 'rows' });
     const steps = [], groups = [], info = [];
-    const push = (i, g) => { if (col[i] >= 0) { steps.push(i); groups.push(g); } };
+    const push = (i, g) => { if (blank || col[i] >= 0) { steps.push(i); groups.push(g); } };
     let word = P.GROUP_WORD[o.mode] || 'row';
+    // back and forth turns only on lines that have stitches, so empty rows don't flip the direction
+    let used = 0;
+    const lineUsed = (len, at) => { if (blank) return true; for (let j = 0; j < len; j++) if (col[at(j)] >= 0) return true; return false; };
 
     if (o.mode === 'rows') {
       for (let k = 0; k < h; k++) {
         const y = o.startY === 'bottom' ? h - 1 - k : k;
-        const ltr = (o.startX === 'left') !== (o.snake && k % 2 === 1);
+        const ltr = (o.startX === 'left') !== (o.snake && used % 2 === 1);
+        if (lineUsed(w, j => y * w + j)) used++;
         info.push({ name: `Row ${k + 1}`, chart: `chart row ${y + 1}`, dir: ltr ? '→' : '←' });
         for (let j = 0; j < w; j++) push(y * w + (ltr ? j : w - 1 - j), k);
       }
     } else if (o.mode === 'columns') {
       for (let k = 0; k < w; k++) {
         const x = o.startX === 'right' ? w - 1 - k : k;
-        const down = (o.startY === 'top') !== (o.snake && k % 2 === 1);
+        const down = (o.startY === 'top') !== (o.snake && used % 2 === 1);
+        if (lineUsed(h, j => j * w + x)) used++;
         info.push({ name: `Column ${k + 1}`, chart: `chart column ${x + 1}`, dir: down ? '↓' : '↑' });
         for (let j = 0; j < h; j++) push((down ? j : h - 1 - j) * w + x, k);
       }
@@ -133,13 +147,30 @@
     for (let k = 0; k < S.length; k++) posOf[S[k]] = k;
     const gStart = new Int32Array(info.length).fill(-1), gEnd = new Int32Array(info.length).fill(-1);
     for (let k = 0; k < G.length; k++) { if (gStart[G[k]] < 0) gStart[G[k]] = k; gEnd[G[k]] = k + 1; }
-    return { order: o, steps: S, groups: G, posOf, col, info, gStart, gEnd, groupCount: info.length, word };
+    return { order: o, steps: S, groups: G, posOf, col, info, gStart, gEnd, groupCount: info.length, word, blank };
+  };
+
+  // ---- time record: one entry per stitching session { id, start, end, ms (active time), stitches } ----
+  P.normTime = t => ({ sessions: (t && Array.isArray(t.sessions) ? t.sessions : []).filter(x => x && x.ms >= 0) });
+  P.timeTotals = t => {
+    const ss = (t && t.sessions) || [];
+    return { ms: ss.reduce((a, x) => a + (x.ms || 0), 0), stitches: ss.reduce((a, x) => a + (x.stitches || 0), 0), count: ss.filter(x => x.ms >= 1000).length };
+  };
+  P.fmtDuration = (ms, secs) => {
+    const s = Math.max(0, Math.round(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    if (secs) return `${h}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    return h ? `${h} h ${String(m).padStart(2, '0')} min` : m ? `${m} min` : `${s % 60} s`;
   };
 
   // ---- progress record ----
-  P.newRecord = (p, order) => ({ id: p.id, w: p.w, h: p.h, done: new Uint8Array(p.w * p.h), vec: new Set(), order: P.normOrder(order || P.defaultOrder(p.settings)), pos: 0, started: Date.now() });
-  P.encode = r => ({ id: r.id, w: r.w, h: r.h, done: U.bytesToB64(r.done), vec: Array.from(r.vec), order: r.order, pos: r.pos || 0, started: r.started, updated: Date.now() });
-  P.decode = r => ({ id: r.id, w: r.w, h: r.h, done: U.b64ToBytes(r.done), vec: new Set(r.vec || []), order: P.normOrder(r.order), pos: r.pos || 0, started: r.started || Date.now() });
+  P.newRecord = (p, order) => ({ id: p.id, w: p.w, h: p.h, done: new Uint8Array(p.w * p.h), vec: new Set(), order: P.normOrder(order || P.defaultOrder(p.settings)), pos: 0, started: Date.now(), time: P.normTime() });
+  P.encode = r => ({ id: r.id, w: r.w, h: r.h, done: U.bytesToB64(r.done), vec: Array.from(r.vec), order: r.order, pos: r.pos || 0, started: r.started, time: P.normTime(r.time), updated: Date.now() });
+  P.decode = r => {
+    const order = migrateOrder(r.order);
+    return { id: r.id, w: r.w, h: r.h, done: U.b64ToBytes(r.done), vec: new Set(r.vec || []), order: P.normOrder(order),
+      pos: order === r.order ? r.pos || 0 : 0, // a new order: continue at its first open stitch
+      started: r.started || Date.now(), time: P.normTime(r.time) };
+  };
   P.describe = (o) => {
     o = P.normOrder(o);
     switch (o.mode) {
@@ -152,6 +183,15 @@
     }
   };
 
+  /** Pattern file (.stitch.json) with the stitching progress and time record of that pattern. */
+  P.toFile = (json, encodedRec) => (encodedRec ? Object.assign({}, json, { stitching: Object.assign({}, encodedRec, { id: undefined }) }) : json);
+  /** Progress stored in a pattern file, for pattern p (new id); null when none or the size no longer fits. */
+  P.fromFile = (json, p) => {
+    const st = json && json.stitching;
+    if (!st || st.w !== p.w || st.h !== p.h || !st.done) return null;
+    try { return Object.assign({}, st, { id: p.id }); } catch (e) { return null; }
+  };
+
   P.vecKey = (type, o) => type === 'l'
     ? 'l:' + ((o.x1 < o.x2 || (o.x1 === o.x2 && o.y1 <= o.y2)) ? [o.x1, o.y1, o.x2, o.y2] : [o.x2, o.y2, o.x1, o.y1]).join(',')
     : type + ':' + o.x + ',' + o.y;
@@ -161,12 +201,13 @@
     col = col || P.cellColors(p);
     const per = p.palette.map(() => ({ total: 0, done: 0 }));
     let total = 0, done = 0;
+    const blank = !col.some(v => v >= 0); // empty pattern: every cell counts
     for (let i = 0; i < col.length; i++) {
-      if (col[i] < 0) continue;
+      if (col[i] < 0 && !blank) continue;
       total++;
       const d = rec.done[i] ? 1 : 0;
       done += d;
-      if (per[col[i]]) { per[col[i]].total++; per[col[i]].done += d; }
+      if (col[i] >= 0 && per[col[i]]) { per[col[i]].total++; per[col[i]].done += d; }
     }
     let vecTotal = 0, vecDone = 0;
     const vt = (t, arr) => arr.forEach(o => { vecTotal++; if (rec.vec.has(P.vecKey(t, o))) vecDone++; });
@@ -190,17 +231,25 @@
     ctx.fillStyle = fab;
     ctx.globalAlpha = style === 'hide' ? 1 : style === 'hatch' ? 0.45 : todo ? 0.7 : 0.72;
     const hatch = style === 'hatch' && Math.min(g.cw, g.ch) >= 6;
+    const blankDone = [];
     const hp = hatch ? new Path2D() : null;
     for (let y = vy0; y < vy1; y++) for (let x = vx0; x < vx1; x++) {
-      const i = y * p.w + x;
+      const i = y * p.w + x, b = i * 4;
+      if (!(L[b] | L[b + 1] | L[b + 2] | L[b + 3])) {
+        if (D[i]) blankDone.push(i); // counted cell of an empty grid
+        continue;
+      }
       if (!D[i] !== todo) continue; // fade either the finished or the unfinished stitches
-      const b = i * 4;
-      if (!(L[b] | L[b + 1] | L[b + 2] | L[b + 3])) continue;
       const xy = Geo.cellXY(g, x, y);
       ctx.fillRect(xy[0], xy[1], g.cw + 0.5, g.ch + 0.5);
       if (hp) { hp.moveTo(xy[0] + 1, xy[1] + g.ch - 1); hp.lineTo(xy[0] + g.cw - 1, xy[1] + 1); }
     }
     if (hp) { ctx.globalAlpha = 0.8; ctx.strokeStyle = U.contrastColor(fab) === '#000000' ? '#555' : '#ddd'; ctx.lineWidth = 1.2; ctx.stroke(hp); }
+    if (blankDone.length) { // empty grid: mark counted cells with a soft tint
+      ctx.globalAlpha = 0.35; ctx.fillStyle = '#c2185b';
+      for (const i of blankDone) { const xy = Geo.cellXY(g, i % p.w, (i / p.w) | 0); ctx.fillRect(xy[0], xy[1], g.cw, g.ch); }
+      ctx.fillStyle = fab;
+    }
     // backstitches / knots / beads: draw a light line over the faded ones
     if (rec.vec.size || todo) {
       ctx.globalAlpha = 0.75; ctx.strokeStyle = fab; ctx.lineCap = 'round';

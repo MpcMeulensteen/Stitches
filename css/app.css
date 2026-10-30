@@ -57,7 +57,8 @@ h4 { margin: 10px 0 6px; font-size: 12px; color: var(--muted); font-weight: 600;
 
 #app {
   display: grid; height: 100vh;
-  grid-template-columns: 220px 1fr 280px;
+  --lw: 220px; --rw: 280px;
+  grid-template-columns: var(--lw) 1fr var(--rw);
   grid-template-rows: auto 1fr auto;
   grid-template-areas: "top top top" "left work right" "status status status";
 }
@@ -78,6 +79,19 @@ h4 { margin: 10px 0 6px; font-size: 12px; color: var(--muted); font-weight: 600;
 #leftbar, #rightbar { background: var(--panel); overflow-y: auto; }
 #leftbar { grid-area: left; border-right: 1px solid var(--border); padding: 8px; }
 #rightbar { grid-area: right; border-left: 1px solid var(--border); padding: 8px; }
+/* collapsible side panels */
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: -4px -2px 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.collapse-btn { padding: 0 7px; line-height: 20px; font-size: 14px; min-width: 24px; }
+#app.left-collapsed { --lw: 34px; }
+#app.right-collapsed { --rw: 34px; }
+#app.left-collapsed #leftbar, #app.right-collapsed #rightbar { padding: 8px 4px; overflow: hidden; }
+#app.left-collapsed #leftbar > :not(.panel-head), #app.right-collapsed #rightbar > :not(.panel-head) { display: none; }
+#app.left-collapsed .panel-head span, #app.right-collapsed .panel-head span { display: none; }
+#app.left-collapsed .panel-head, #app.right-collapsed .panel-head { justify-content: center; margin: -4px 0 0; }
+.numbering { margin: 0 0 6px 22px; }
+.numbering .row { margin: 3px 0; }
+.numbering span { width: 100px; font-size: 12px; color: var(--muted); }
+.numbering select { flex: 1; }
 
 .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .tools button { padding: 6px 0; display: flex; justify-content: center; align-items: center; height: 38px; }
@@ -205,5 +219,13 @@ button.wide { width: 100%; margin-top: 4px; }
   .print-footer { font-size: 8pt; color: #555; margin-top: 2mm; }
 }
 @media (max-width: 900px) {
-  #app { grid-template-columns: 180px 1fr; grid-template-areas: "top top" "left work" "right right" "status status"; grid-template-rows: auto 1fr 220px auto; }
+  #app { grid-template-columns: var(--lw) 1fr; grid-template-areas: "top top" "left work" "right right" "status status"; grid-template-rows: auto 1fr var(--rh, 220px) auto; --lw: 180px; }
+  #app.right-collapsed { --rh: 34px; }
 }
+
+/* Excel import */
+.xl-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.xl-opts { grid-template-columns: 110px minmax(0, 320px); margin-bottom: 4px; }
+.xl-grid { overflow: auto; max-height: 52vh; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); min-height: 40px; }
+#xlCanvas { display: block; cursor: crosshair; touch-action: none; }
+#xlInfo.bad { color: #d84315; }

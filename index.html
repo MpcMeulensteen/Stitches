@@ -21,6 +21,7 @@
       <button data-action="openFile" title="Open a project file from disk">Load file</button>
       <span class="sep"></span>
       <button data-action="importImage" title="Convert a picture into a pattern">Import image</button>
+      <button data-action="importExcel" title="Make a pattern from the cell fill colours of an Excel sheet (or paste copied cells with Ctrl+V)">Import Excel</button>
       <button data-action="exportPng" title="Export as PNG image">Export PNG</button>
       <button data-action="print" title="Printable chart / save as PDF">Print / PDF</button>
       <span class="sep"></span>
@@ -37,6 +38,7 @@
 
   <!-- ============ LEFT: TOOLS ============ -->
   <aside id="leftbar">
+    <div class="panel-head"><span>Tools</span><button type="button" class="collapse-btn" data-panel-toggle="left">«</button></div>
     <div id="toolButtons" class="tools"></div>
     <div id="toolOptions" class="tool-options">
 
@@ -165,6 +167,7 @@
 
   <!-- ============ RIGHT: PALETTE / VIEW ============ -->
   <aside id="rightbar">
+    <div class="panel-head"><button type="button" class="collapse-btn" data-panel-toggle="right">»</button><span>Colours &amp; view</span></div>
     <section class="panel">
       <h3>Colours</h3>
       <button type="button" id="currentColor" class="current-color" aria-expanded="false" aria-controls="paletteDrop" title="Show / hide all colours"></button>
@@ -194,7 +197,11 @@
       <label class="check"><input type="checkbox" id="viewGrid"> Grid lines</label>
       <label class="check"><input type="checkbox" id="viewMajor"> Major grid lines</label>
       <label class="check"><input type="checkbox" id="viewCenter"> Centre lines</label>
-      <label class="check"><input type="checkbox" id="viewRulers"> Rulers</label>
+      <label class="check" title="Numbers for every row and column, right next to the grid. They stay in view while you move around."><input type="checkbox" id="viewRulers"> Row &amp; column numbers</label>
+      <div class="numbering" id="numberingRow">
+        <div class="row"><span>Row 1 at the</span><select id="viewRowsFrom" title="Count rows from the top or from the bottom"><option value="top">Top</option><option value="bottom">Bottom</option></select></div>
+        <div class="row"><span>Column 1 at the</span><select id="viewColsFrom" title="Count columns from the left or from the right"><option value="left">Left</option><option value="right">Right</option></select></div>
+      </div>
       <label class="check"><input type="checkbox" id="viewBack"> Backstitches</label>
       <label class="check"><input type="checkbox" id="viewKnots"> Knots &amp; beads</label>
       <label class="check"><input type="checkbox" id="viewMarks"> Stitch symbols</label>
@@ -363,6 +370,26 @@
   </form>
 </dialog>
 
+<dialog id="dlgExcel" class="dlg xwide">
+  <form method="dialog">
+    <h2>Import from Excel</h2>
+    <div class="xl-top">
+      <input type="file" id="xlFile" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      <span class="hint">or copy cells in Excel (Ctrl+C) and press <b>Ctrl+V</b> here</span>
+    </div>
+    <div class="form-grid xl-opts">
+      <label class="xl-sheet" hidden>Tab</label><select name="sheet" class="xl-sheet" id="xlSheetRow" hidden></select>
+      <label>Cell range</label><input type="text" name="range" placeholder="e.g. B2:BI55" spellcheck="false">
+      <label>Craft</label><select name="craft" class="craft-select"></select>
+      <label>Pattern name</label><input type="text" name="name" maxlength="80">
+    </div>
+    <p id="xlInfo" class="hint"></p>
+    <div class="xl-grid"><canvas id="xlCanvas"></canvas></div>
+    <p class="hint">Drag over the cells to choose the range (it starts with all filled cells). Every cell with a fill colour becomes a full stitch in exactly that colour; cells without a fill stay empty. Use <b>Match to brand…</b> afterwards to turn the colours into threads.</p>
+    <div class="dlg-buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary" id="xlApply">Create pattern</button></div>
+  </form>
+</dialog>
+
 <dialog id="dlgPng" class="dlg">
   <form method="dialog">
     <h2>Export PNG</h2>
@@ -438,7 +465,7 @@
         <h4>Keys</h4>
         <table>
           <tr><td>Ctrl+Z / Ctrl+Y</td><td>Undo / redo</td></tr>
-          <tr><td>Ctrl+C / X / V</td><td>Copy / cut / paste</td></tr>
+          <tr><td>Ctrl+C / X / V</td><td>Copy / cut / paste (cells copied from Excel open the Excel import)</td></tr>
           <tr><td>Ctrl+A</td><td>Select all</td></tr>
           <tr><td>Delete</td><td>Clear selection</td></tr>
           <tr><td>H / V / R</td><td>Flip / rotate the pasted part</td></tr>
@@ -447,6 +474,7 @@
           <tr><td>X</td><td>Toggle half-stitch direction</td></tr>
           <tr><td>1 – 9</td><td>Pick palette colour</td></tr>
           <tr><td>Mouse wheel, + / −, 0</td><td>Zoom, fit to screen</td></tr>
+          <tr><td>Tab</td><td>Hide / show both side panels</td></tr>
           <tr><td>Ctrl+S</td><td>Download project file</td></tr>
         </table>
       </div>
@@ -471,6 +499,7 @@
 <script src="js/renderer.js"></script>
 <script src="js/tools.js"></script>
 <script src="js/importer.js"></script>
+<script src="js/xlsx.js"></script>
 <script src="js/exporter.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/progress.js"></script>

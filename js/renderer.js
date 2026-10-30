@@ -322,18 +322,20 @@
 
     // Grid
     const N = Math.max(2, s.majorEvery | 0);
+    // major lines are counted from the side the numbering starts at (o.flipX: right, o.flipY: bottom)
+    const majX = x => (o.flipX ? g.w - x : x) % N === 0, majY = y => (o.flipY ? g.h - y : y) % N === 0;
     const top = Math.max(py0, 0), bot = Math.min(py0 + PH, o.height);
     const left = Math.max(px0, 0), right = Math.min(px0 + PW, o.width);
     if (g.layout === 'grid') {
       if (o.grid && minS >= 4) {
         ctx.beginPath();
         for (let x = vx0; x <= vx1; x++) {
-          if (o.major && x % N === 0) continue;
+          if (o.major && majX(x)) continue;
           const X = Math.round(g.ox + x * g.cw) + 0.5;
           ctx.moveTo(X, top); ctx.lineTo(X, bot);
         }
         for (let y = vy0; y <= vy1; y++) {
-          if (o.major && y % N === 0) continue;
+          if (o.major && majY(y)) continue;
           const Y = Math.round(g.oy + y * g.ch) + 0.5;
           ctx.moveTo(left, Y); ctx.lineTo(right, Y);
         }
@@ -341,11 +343,13 @@
       }
       if (o.major && minS >= 1.5) {
         ctx.beginPath();
-        for (let x = Math.ceil(vx0 / N) * N; x <= vx1; x += N) {
+        for (let x = vx0; x <= vx1; x++) {
+          if (!majX(x)) continue;
           const X = Math.round(g.ox + x * g.cw) + 0.5;
           ctx.moveTo(X, top); ctx.lineTo(X, bot);
         }
-        for (let y = Math.ceil(vy0 / N) * N; y <= vy1; y += N) {
+        for (let y = vy0; y <= vy1; y++) {
+          if (!majY(y)) continue;
           const Y = Math.round(g.oy + y * g.ch) + 0.5;
           ctx.moveTo(left, Y); ctx.lineTo(right, Y);
         }
@@ -463,6 +467,99 @@
     ctx.fillStyle = o.rulerBg || '#efedea'; ctx.fillRect(0, 0, RS, RS);
     ctx.strokeStyle = '#9a948e';
     ctx.beginPath(); ctx.moveTo(0, RS + 0.5); ctx.lineTo(o.width, RS + 0.5); ctx.moveTo(RS + 0.5, 0); ctx.lineTo(RS + 0.5, o.height); ctx.stroke();
+    ctx.restore();
+  };
+
+  /**
+   * Row and column numbers right next to the grid (editor view).
+   * The column numbers sit just above the grid and the row numbers just left of it; when that edge
+   * of the grid is scrolled out of view they stay pinned to the edge of the window instead.
+   * o: { width, height, bg, text, line, accent, hover:{x,y}|null,
+   *      flipX: count columns from the right, flipY: count rows from the bottom }
+   */
+  R.drawGridNumbers = function (ctx, p, g, o) {
+    const s = p.settings, W = o.width, H = o.height;
+    const sz = Geo.size(g);
+    const gx0 = g.ox, gy0 = g.oy, gx1 = g.ox + sz[0], gy1 = g.oy + sz[1];
+    if (gx1 < 0 || gy1 < 0 || gx0 > W || gy0 > H) return; // grid not on screen
+    const FS = 11, N = Math.max(2, s.majorEvery | 0);
+    const font = (bold) => `${bold ? '700 ' : ''}${FS}px "Segoe UI", Arial, sans-serif`;
+    ctx.save();
+    ctx.font = font(true);
+    const digitW = ctx.measureText(String(Math.max(p.w, p.h))).width;
+    const BH = FS + 7;                                  // height of the column-number band
+    const BW = Math.ceil(digitW) + 8;                   // width of the row-number band
+    // label every cell when there is room, otherwise every 2, 5, 10, ... (always including the major lines)
+    const pick = (room, need) => [1, 2, 5, 10, 20, 50, 100, 200, 500].find(k => k * room >= need) || 1000;
+    const stepX = pick(g.cw, digitW + 4), stepY = pick(g.ch, FS + 1);
+    // band positions: hug the grid, but stay inside the window and never past the far edge of the grid
+    const by = Math.max(0, Math.min(gy0 - BH, gy1 - BH));
+    const bx = Math.max(0, Math.min(gx0 - BW, gx1 - BW));
+    const vx0 = Math.max(0, Math.floor(-g.ox / g.cw) - 1), vx1 = Math.min(p.w, Math.ceil((W - g.ox) / g.cw) + 1);
+    const vy0 = Math.max(0, Math.floor(-g.oy / g.ch) - 1), vy1 = Math.min(p.h, Math.ceil((H - g.oy) / g.ch) + 1);
+    const cX = (p.w - 1) / 2, cY = (p.h - 1) / 2;       // centre column / row (may be between two)
+    const isCentre = (i, c) => Math.abs(i - c) < 0.6;
+    const colNo = x => (o.flipX ? p.w - x : x + 1), rowNo = y => (o.flipY ? p.h - y : y + 1);
+    const majX = x => (o.flipX ? p.w - x : x) % N === 0, majY = y => (o.flipY ? p.h - y : y) % N === 0;
+    // a label is shown on its step, but not right next to the highlighted (hovered) one
+    const showX = (x, n) => n % stepX === 0 && !(o.hover && x !== o.hover.x && Math.abs(x - o.hover.x) * g.cw < digitW + 4);
+    const showY = (y, n) => n % stepY === 0 && !(o.hover && y !== o.hover.y && Math.abs(y - o.hover.y) * g.ch < FS + 1);
+    ctx.textBaseline = 'middle';
+
+    const band = (x, y, w, h) => {
+      ctx.globalAlpha = 0.94; ctx.fillStyle = o.bg; ctx.fillRect(x, y, w, h); ctx.globalAlpha = 1;
+    };
+    const label = (txt, x, y, kind) => {
+      ctx.font = font(kind !== 'plain');
+      ctx.fillStyle = kind === 'hover' ? '#ffffff' : kind === 'centre' ? (s.centerColor || '#e0457b') : o.text;
+      ctx.fillText(txt, x, y);
+    };
+
+    // ---- column numbers (above the grid) ----
+    const spill = Math.ceil(digitW / 2) + 2; // the first / last number may stick out a little
+    const cl = Math.max(gx0 - (bx + BW < gx0 ? Math.min(spill, gx0 - bx - BW) : 0), bx + BW), cr = Math.min(gx1 + spill, W);
+    if (cr > cl) {
+      band(cl, by, cr - cl, BH);
+      ctx.save(); ctx.beginPath(); ctx.rect(cl, by, cr - cl, BH); ctx.clip();
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = o.line; ctx.lineWidth = 1; ctx.beginPath();
+      for (let x = vx0; x < vx1; x++) {
+        const X = g.ox + x * g.cw, n = colNo(x), mid = X + g.cw / 2;
+        if (o.hover && o.hover.x === x) {
+          ctx.fillStyle = o.accent; ctx.fillRect(X, by + 1, g.cw, BH - 2);
+          label(String(n), mid, by + BH / 2 + 0.5, 'hover');
+        } else if (showX(x, n)) {
+          label(String(n), mid, by + BH / 2 + 0.5, isCentre(x, cX) ? 'centre' : n % N === 0 ? 'major' : 'plain');
+        }
+        if (majX(x) && x) { const L = Math.round(X) + 0.5; ctx.moveTo(L, by + BH - 5); ctx.lineTo(L, by + BH); }
+      }
+      ctx.stroke(); ctx.restore();
+      ctx.strokeStyle = o.line; ctx.beginPath(); ctx.moveTo(cl, by + BH - 0.5); ctx.lineTo(cr, by + BH - 0.5); ctx.stroke();
+    }
+
+    // ---- row numbers (left of the grid) ----
+    const rt = Math.max(gy0, by + BH), rb = Math.min(gy1, H);
+    if (rb > rt) {
+      band(bx, rt, BW, rb - rt);
+      ctx.save(); ctx.beginPath(); ctx.rect(bx, rt, BW, rb - rt); ctx.clip();
+      ctx.textAlign = 'right';
+      ctx.strokeStyle = o.line; ctx.lineWidth = 1; ctx.beginPath();
+      for (let y = vy0; y < vy1; y++) {
+        const Y = g.oy + y * g.ch, n = rowNo(y), mid = Y + g.ch / 2;
+        if (o.hover && o.hover.y === y) {
+          ctx.fillStyle = o.accent; ctx.fillRect(bx + 1, Y, BW - 2, g.ch);
+          label(String(n), bx + BW - 4, mid + 0.5, 'hover');
+        } else if (showY(y, n)) {
+          label(String(n), bx + BW - 4, mid + 0.5, isCentre(y, cY) ? 'centre' : n % N === 0 ? 'major' : 'plain');
+        }
+        if (majY(y) && y) { const L = Math.round(Y) + 0.5; ctx.moveTo(bx + BW - 5, L); ctx.lineTo(bx + BW, L); }
+      }
+      ctx.stroke(); ctx.restore();
+      ctx.strokeStyle = o.line; ctx.beginPath(); ctx.moveTo(bx + BW - 0.5, rt); ctx.lineTo(bx + BW - 0.5, rb); ctx.stroke();
+    }
+
+    // corner where the two bands meet
+    if (cr > cl && rb > rt) band(bx, by, BW, BH);
     ctx.restore();
   };
 

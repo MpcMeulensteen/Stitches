@@ -7,13 +7,19 @@ It is a plain static website (HTML, CSS and JavaScript). There is no build step 
 
 **Quick start:** double-click `index.html`. This works in Chrome and Edge.
 
-**Local web server** (recommended, behaves exactly like IIS):
+**Windows service on port 3001** (recommended: starts automatically with Windows, set up like The Pawcket Pile):
+
+Needs [Node.js](https://nodejs.org). In an **Administrator** terminal in this folder:
 
 ```bash
-py -m http.server 8642
+npm install
+node scripts/install-service.js
 ```
 
-Then open http://localhost:8642.
+Then open http://localhost:3001 (other devices on your network: `http://<this-PC's-IP>:3001`).
+The service is called *Stitch Pattern Studio* in `services.msc`; its logs are in `server/daemon`.
+To remove it: `node scripts/uninstall-service.js` (also as Administrator).
+To run it just once without the service: `npm start`.
 
 **IIS**
 
@@ -21,6 +27,16 @@ Then open http://localhost:8642.
 2. In IIS Manager: *Sites → Add Website*, physical path = this folder, any port.
 3. `web.config` already sets `index.html` as the default document and the MIME types.
    No ASP.NET or other modules are needed. The app pool can be "No Managed Code".
+
+## Importing from Excel
+
+**Import Excel** makes a pattern from the fill colours of spreadsheet cells (filled with the paint bucket):
+
+1. Choose an `.xlsx` file and the tab, or copy cells in Excel (Ctrl+C) and press Ctrl+V in the editor.
+2. The filled cells are selected automatically; drag over the preview or type a range (e.g. `B2:BI55`) to change it.
+3. *Create pattern* makes a new pattern exactly the size of the range. Every filled cell becomes a full stitch in exactly that colour; cells without a fill stay empty. Use *Match to brand…* to turn the colours into DMC or Anchor threads.
+
+Theme colours with lighter / darker shades are read the same way Excel shows them. Old `.xls` files must be saved as `.xlsx` first.
 
 ## Profiles
 
@@ -74,6 +90,10 @@ There are three ways to start:
 - Progress: % done, progress per colour, speed and estimated time left, and confetti when you finish.
 - Progress is saved per pattern. In the editor, **View → Stitching progress** fades finished stitches, and the Pattern panel shows "% stitched". Both pages update each other live when they're open in two tabs.
 
+### Sessions and time record
+
+The **Session** box in the counter times your stitching. A session starts with your first stitch (or **Start**); **Pause** / **Resume** (key **P**, changeable in Settings) stops and continues the clock. Every session is kept in a time record with its date, active time and number of stitches, so the next time you see how long the pattern took so far. The record is saved with the pattern's progress, shown in the editor's Pattern panel, and included in **Save file** (the `stitching` part of the `.stitch.json`); **Load file** brings it back.
+
 ## Project layout
 
 ```
@@ -88,10 +108,13 @@ js/history.js     undo / redo
 js/renderer.js    canvas drawing
 js/tools.js       drawing tools
 js/importer.js    image → pattern conversion
+js/xlsx.js        Excel import (cell fill colours from .xlsx files and pasted cells)
 js/exporter.js    PNG export and printing
 js/storage.js     browser storage
 js/ui.js          panels and dialogs
 js/app.js         application controller
+server/server.js  local web server (port 3001)
+scripts/          install / uninstall the Windows service
 ```
 
 ## Credits

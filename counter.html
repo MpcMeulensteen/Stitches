@@ -44,7 +44,7 @@
   <section id="patternPane" class="pp" hidden>
     <div class="pp-tools">
       <div class="seg" id="ppTool" title="What a click on the chart does">
-        <button data-tool="jump" title="Click a stitch to continue from there">Jump here</button>
+        <button data-tool="jump" title="Click a stitch to start or continue from there">Start here</button>
         <button data-tool="mark" title="Click or drag to mark stitches (and backstitches, knots, beads) as done">Mark done</button>
         <button data-tool="unmark" title="Click or drag to mark stitches as not done">Unmark</button>
         <button data-tool="pan" title="Drag to move the view (right mouse button always does this)">Move view</button>
@@ -63,6 +63,12 @@
         <option value="hatch">Done: crossed out</option>
         <option value="hide">Done: hidden</option>
       </select>
+      <label class="pp-start" id="ppStartWrap" title="The corner where you start stitching. Stitches you already did stay done.">Start
+        <select id="ppStart">
+          <option value="tl">Top left</option><option value="tr">Top right</option>
+          <option value="bl">Bottom left</option><option value="br">Bottom right</option>
+        </select>
+      </label>
       <span class="pp-zoom">
         <button id="ppZoomOut" title="Zoom out">−</button><button id="ppZoomIn" title="Zoom in">+</button>
         <button id="ppFit" title="Whole pattern">Fit</button><button id="ppFind" title="Show the current stitch">Find</button>
@@ -77,7 +83,7 @@
     <div id="psGroup" class="ps-group"></div>
     <div id="psAhead" class="ps-ahead"></div>
     <div class="ps-btns">
-      <button data-pact="back" title="Undo the last stitch">← Back</button>
+      <button data-pact="back" title="Undo the last step (stitch, finished row or jump)">← Back</button>
       <button data-pact="next" class="plus" title="This stitch is done">Next stitch</button>
       <button data-pact="finish" id="psFinishBtn" title="The rest of this row is done">Finish row</button>
     </div>
@@ -91,8 +97,13 @@
   <section class="ct-side">
     <div class="ct-box">
       <h3>Session</h3>
+      <div class="sess-clocks">
+        <div class="sess-clock"><span class="lbl">This session <span id="sessState" class="sess-state">not started</span></span><span id="sessClock" class="t">0:00:00</span></div>
+        <div class="sess-clock total"><span class="lbl" id="sessTotalLbl">Total</span><span id="sessTotal" class="t">0:00:00</span></div>
+      </div>
+      <button data-act="toggleSession" id="sessBtn" class="wide sess-btn">▶ Start</button>
       <div id="sessionInfo" class="info"></div>
-      <button data-act="resetSession" class="wide">Restart session timer</button>
+      <details id="sessLog"><summary>Time record</summary><ol id="sessList" class="history sess-list"></ol></details>
     </div>
     <div class="ct-box">
       <h3>Notes</h3>
@@ -170,6 +181,8 @@
     <div class="form-grid" style="margin-top:8px">
       <label>Undo key</label>
       <div class="key-row"><button type="button" class="key-cap" data-capture-global="undoKey"></button><button type="button" data-clear-global="undoKey">✕</button></div>
+      <label>Pause / resume key</label>
+      <div class="key-row"><button type="button" class="key-cap" data-capture-pause></button><button type="button" data-clear-pause>✕</button></div>
       <label>Counter size</label>
       <select name="size"><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select>
     </div>
@@ -192,10 +205,10 @@
         <div class="form-grid">
           <label>Quick choice</label><select name="preset"></select>
           <label>Order</label><select name="mode"></select>
-          <label data-modes="rows columns">Start at</label>
-          <select name="startY" data-modes="rows columns"><option value="top">Top</option><option value="bottom">Bottom</option></select>
-          <label data-modes="rows columns">First stitch on the</label>
-          <select name="startX" data-modes="rows columns"><option value="left">Left</option><option value="right">Right</option></select>
+          <label data-modes="rows columns">Start corner</label>
+          <select name="startY" data-modes="rows columns"><option value="top">Top row</option><option value="bottom">Bottom row</option></select>
+          <label data-modes="rows columns"></label>
+          <select name="startX" data-modes="rows columns"><option value="left">Left side</option><option value="right">Right side</option></select>
           <label data-modes="diagonal">Start corner</label>
           <select name="corner" data-modes="diagonal"><option value="bl">Bottom left</option><option value="br">Bottom right</option><option value="tl">Top left</option><option value="tr">Top right</option></select>
           <label data-modes="rows columns diagonal"></label>
@@ -208,6 +221,7 @@
           <label class="check" data-modes="blocks"><input type="checkbox" name="blockSnake"> Blocks back and forth</label>
         </div>
         <p class="hint order-info"></p>
+        <p class="hint">To begin somewhere else than the corner, use <b>Start here</b> above the chart and click the stitch you start with.</p>
       </div>
       <div>
         <h4>Keys</h4>

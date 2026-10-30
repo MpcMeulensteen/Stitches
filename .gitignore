@@ -4,3 +4,5 @@
 
 /.claude
 /.vs
+/node_modules
+/server/daemon

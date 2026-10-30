@@ -166,6 +166,46 @@
       const mode = $('#viewMode');
       mode.value = v.mode;
       mode.addEventListener('change', () => { v.mode = mode.value; app.saveState(); app.render(); });
+      // where row and column numbers start counting
+      for (const [id, key] of [['#viewRowsFrom', 'rowsFrom'], ['#viewColsFrom', 'colsFrom']]) {
+        const el = $(id);
+        el.value = v[key];
+        el.addEventListener('change', () => { v[key] = el.value; app.saveState(); app.refreshInfo(); app.render(); el.blur(); });
+      }
+      const showNumOpts = () => { $('#numberingRow').hidden = !v.rulers; };
+      $('#viewRulers').addEventListener('change', showNumOpts);
+      showNumOpts();
+      this.bindPanels();
+    },
+
+    // ================= collapsible side panels =================
+    bindPanels() {
+      const saved = SP.Storage.prefs.get('panels', {});
+      this.setPanel('left', !!saved.left, true);
+      this.setPanel('right', !!saved.right, true);
+      document.addEventListener('click', e => {
+        const b = e.target.closest('[data-panel-toggle]');
+        if (!b) return;
+        const side = b.dataset.panelToggle;
+        this.setPanel(side, !$('#app').classList.contains(side + '-collapsed'));
+        b.blur();
+      });
+    },
+    setPanel(side, collapsed, quiet) {
+      const appEl = $('#app');
+      appEl.classList.toggle(side + '-collapsed', collapsed);
+      const b = $(`[data-panel-toggle="${side}"]`);
+      const name = side === 'left' ? 'tools' : 'colours / view panel';
+      b.textContent = (side === 'left') === collapsed ? '»' : '«';
+      b.title = (collapsed ? 'Show the ' : 'Hide the ') + name + ' (Tab hides / shows both)';
+      if (quiet) return;
+      SP.Storage.prefs.set('panels', { left: appEl.classList.contains('left-collapsed'), right: appEl.classList.contains('right-collapsed') });
+    },
+    /** Tab: hide both panels, or show both again. */
+    togglePanels() {
+      const c = $('#app').classList;
+      const hide = !(c.contains('left-collapsed') && c.contains('right-collapsed'));
+      this.setPanel('left', hide); this.setPanel('right', hide);
     },
 
     // ================= actions =================
@@ -176,6 +216,7 @@
         saveFile: () => app.saveFile(),
         openFile: () => $('#fileOpen').click(),
         importImage: () => this.dlgImport(),
+        importExcel: () => this.dlgExcel(),
         exportPng: () => this.dlgPng(),
         print: () => this.dlgPrint(),
         undo: () => app.undo(), redo: () => app.redo(),
@@ -649,6 +690,190 @@
         app.setPattern(p, false);
         app.toast('Pattern created from image. Your previous pattern is in Open.');
       });
+    },
+    /**
+     * Import from Excel: an .xlsx file (choose tab + cell range) or cells pasted with Ctrl+V.
+     * Every filled cell becomes a full stitch in exactly that colour; a new pattern the size of the range.
+     */
+    dlgExcel(pasted) {
+      const X = SP.Xlsx, d = $('#dlgExcel'), f = d.querySelector('form');
+      const cv = $('#xlCanvas'), info = $('#xlInfo'), ok = $('#xlApply');
+      const sel = f.querySelector('.craft-select');
+      this.fillCraftSelect(sel, 'cross');
+      let book = null, src = null, view = null, range = null, baseName = '';
+      const MAX = 600;
+      const setInfo = (txt, bad) => { info.textContent = txt; info.classList.toggle('bad', !!bad); };
+
+      const countColours = () => {
+        if (!src || !range) return null;
+        const seen = new Map();
+        let stitches = 0;
+        for (let r = range.r1; r <= range.r2; r++) for (let c = range.c1; c <= range.c2; c++) {
+          const h = src.colorAt(r, c);
+          if (h) { stitches++; seen.set(h, (seen.get(h) || 0) + 1); }
+        }
+        return { seen, stitches };
+      };
+      const update = () => {
+        if (!src) { ok.disabled = true; return; }
+        if (!range) { ok.disabled = true; setInfo('Type a cell range like B2:BI55, or drag over the cells below.', true); draw(); return; }
+        const w = range.c2 - range.c1 + 1, h = range.r2 - range.r1 + 1;
+        if (w > MAX || h > MAX) { ok.disabled = true; setInfo(`${X.rangeText(range)} is ${w} × ${h} cells; the maximum is ${MAX} × ${MAX}.`, true); draw(); return; }
+        const cc = countColours();
+        ok.disabled = !cc.stitches;
+        setInfo(`${X.rangeText(range)} → pattern of ${w} × ${h} stitches, ${cc.stitches} filled cells, ${cc.seen.size} colours` +
+          (cc.stitches ? '' : ' (no filled cells in this range)'), !cc.stitches);
+        draw();
+      };
+
+      // ---- the cell preview you can drag over ----
+      const HEAD = 18, LEFT = 34;
+      const layoutView = () => {
+        const base = src.used || src.dimension || { r1: 0, c1: 0, r2: 29, c2: 29 };
+        const pad = pasted ? 0 : 2;
+        view = { r1: Math.max(0, base.r1 - pad), c1: Math.max(0, base.c1 - pad), r2: base.r2 + pad, c2: base.c2 + pad };
+        if (range) { view.r1 = Math.min(view.r1, range.r1); view.c1 = Math.min(view.c1, range.c1); view.r2 = Math.max(view.r2, range.r2); view.c2 = Math.max(view.c2, range.c2); }
+        view.r2 = Math.min(view.r2, view.r1 + MAX + 20); view.c2 = Math.min(view.c2, view.c1 + MAX + 20);
+        const rows = view.r2 - view.r1 + 1, cols = view.c2 - view.c1 + 1;
+        view.cell = U.clamp(Math.floor(Math.min(760 / cols, 420 / rows)), 4, 22);
+        const dpr = window.devicePixelRatio || 1;
+        const W = LEFT + cols * view.cell + 1, H = HEAD + rows * view.cell + 1;
+        cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+        view.dpr = dpr;
+      };
+      const draw = () => {
+        if (!src || !view) return;
+        const ctx = cv.getContext('2d'), k = view.cell;
+        const css = getComputedStyle(document.documentElement);
+        const panel = css.getPropertyValue('--panel-2').trim() || '#f3f1ee', text = css.getPropertyValue('--muted').trim() || '#777';
+        ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        const rows = view.r2 - view.r1 + 1, cols = view.c2 - view.c1 + 1;
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(LEFT, HEAD, cols * k, rows * k);
+        for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+          const h = src.colorAt(view.r1 + r, view.c1 + c);
+          if (h) { ctx.fillStyle = h; ctx.fillRect(LEFT + c * k, HEAD + r * k, k, k); }
+        }
+        if (k >= 6) {
+          ctx.strokeStyle = 'rgba(0,0,0,.12)'; ctx.lineWidth = 1; ctx.beginPath();
+          for (let c = 0; c <= cols; c++) { ctx.moveTo(LEFT + c * k + 0.5, HEAD); ctx.lineTo(LEFT + c * k + 0.5, HEAD + rows * k); }
+          for (let r = 0; r <= rows; r++) { ctx.moveTo(LEFT, HEAD + r * k + 0.5); ctx.lineTo(LEFT + cols * k, HEAD + r * k + 0.5); }
+          ctx.stroke();
+        }
+        // headers: column letters and row numbers as in Excel
+        ctx.fillStyle = panel; ctx.fillRect(0, 0, LEFT + cols * k, HEAD); ctx.fillRect(0, 0, LEFT, HEAD + rows * k);
+        ctx.fillStyle = text; ctx.font = '10px "Segoe UI", Arial, sans-serif'; ctx.textBaseline = 'middle';
+        const stepC = [1, 2, 5, 10, 20, 50].find(s => s * k >= 22) || 100, stepR = [1, 2, 5, 10, 20, 50].find(s => s * k >= 12) || 100;
+        ctx.textAlign = 'center';
+        for (let c = 0; c < cols; c++) if ((view.c1 + c) % stepC === 0 || stepC === 1) ctx.fillText(pasted ? String(view.c1 + c + 1) : X.colName(view.c1 + c), LEFT + c * k + k / 2, HEAD / 2);
+        ctx.textAlign = 'right';
+        for (let r = 0; r < rows; r++) if ((view.r1 + r + 1) % stepR === 0 || stepR === 1) ctx.fillText(String(view.r1 + r + 1), LEFT - 4, HEAD + r * k + k / 2);
+        if (range) {
+          const accent = css.getPropertyValue('--accent').trim() || '#c2185b';
+          const x = LEFT + (range.c1 - view.c1) * k, y = HEAD + (range.r1 - view.r1) * k;
+          const w = (range.c2 - range.c1 + 1) * k, h = (range.r2 - range.r1 + 1) * k;
+          ctx.fillStyle = 'rgba(0,0,0,.35)'; // dim what is outside the range
+          ctx.beginPath(); ctx.rect(LEFT, HEAD, cols * k, rows * k); ctx.rect(x, y, w, h); ctx.fill('evenodd');
+          ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+        }
+      };
+      const cellAt = e => {
+        const b = cv.getBoundingClientRect(), k = view.cell;
+        const c = Math.floor((e.clientX - b.left - LEFT) / k), r = Math.floor((e.clientY - b.top - HEAD) / k);
+        return { r: U.clamp(r, 0, view.r2 - view.r1) + view.r1, c: U.clamp(c, 0, view.c2 - view.c1) + view.c1 };
+      };
+      let drag = null;
+      cv.onpointerdown = e => {
+        if (!view) return;
+        cv.setPointerCapture(e.pointerId);
+        drag = cellAt(e);
+        range = { r1: drag.r, c1: drag.c, r2: drag.r, c2: drag.c };
+        f.range.value = X.rangeText(range); update();
+      };
+      cv.onpointermove = e => {
+        if (!drag) return;
+        const q = cellAt(e);
+        range = { r1: Math.min(drag.r, q.r), c1: Math.min(drag.c, q.c), r2: Math.max(drag.r, q.r), c2: Math.max(drag.c, q.c) };
+        f.range.value = X.rangeText(range); update();
+      };
+      cv.onpointerup = cv.onpointercancel = () => { drag = null; };
+      f.range.oninput = () => { range = X.parseRange(f.range.value); if (range && view && (range.r2 > view.r2 || range.c2 > view.c2 || range.r1 < view.r1 || range.c1 < view.c1)) layoutView(); update(); };
+
+      const useSource = (s, name) => {
+        src = s;
+        range = s.used ? Object.assign({}, s.used) : null; // start with all filled cells
+        f.range.value = range ? X.rangeText(range) : '';
+        if (!f.name.value || f.name.dataset.auto === '1') { f.name.value = name; f.name.dataset.auto = '1'; }
+        layoutView(); update();
+        if (s.empty) setInfo('No filled cells found here. Choose another tab, or check that the cells have a fill colour (not just coloured text).', true);
+      };
+      const loadSheet = i => {
+        setInfo('reading…');
+        book.read(i).then(s => useSource(s, baseName + (book.sheets.length > 1 ? ' – ' + s.name : '')))
+          .catch(err => { src = null; setInfo('Could not read this tab: ' + err.message, true); ok.disabled = true; });
+      };
+      const showPasted = s => {
+        pasted = s; book = null;
+        $('#xlSheetRow').hidden = true; $$('.xl-sheet', d).forEach(el => { el.hidden = true; });
+        $('#xlFile').value = '';
+        useSource(s, 'Pasted from Excel');
+      };
+
+      // reset
+      $('#xlFile').value = ''; f.name.value = ''; f.name.dataset.auto = '1'; f.range.value = '';
+      f.sheet.innerHTML = ''; $$('.xl-sheet', d).forEach(el => { el.hidden = true; });
+      cv.width = cv.height = 0; cv.style.width = cv.style.height = '0';
+      ok.disabled = true;
+      setInfo('Choose an .xlsx file, or copy cells in Excel and press Ctrl+V here.');
+      f.name.oninput = () => { f.name.dataset.auto = '0'; };
+
+      $('#xlFile').onchange = () => {
+        const file = $('#xlFile').files[0];
+        if (!file) return;
+        pasted = null; src = null; ok.disabled = true;
+        baseName = file.name.replace(/\.[^.]+$/, '');
+        setInfo('opening…');
+        X.openFile(file).then(b => {
+          book = b;
+          f.sheet.innerHTML = b.sheets.map((s, i) => `<option value="${i}">${U.esc(s.name)}</option>`).join('');
+          $$('.xl-sheet', d).forEach(el => { el.hidden = false; });
+          f.sheet.onchange = () => loadSheet(+f.sheet.value);
+          loadSheet(0);
+        }).catch(err => { setInfo(err.message, true); });
+      };
+      d.onpaste = e => {
+        if (e.target === f.range || e.target === f.name) return; // normal text paste
+        const html = e.clipboardData && e.clipboardData.getData('text/html');
+        const s = html && X.fromHtml(html);
+        if (!s) { setInfo('The clipboard has no cells. Select cells in Excel, press Ctrl+C, then Ctrl+V here.', true); return; }
+        e.preventDefault();
+        showPasted(s);
+      };
+
+      this.openDialog('dlgExcel', () => {
+        if (!src || !range) return;
+        const w = range.c2 - range.c1 + 1, h = range.r2 - range.r1 + 1;
+        if (w > MAX || h > MAX) return;
+        const settings = Object.assign(SP.defaultSettings(), { craft: sel.value, units: app.pattern ? app.pattern.settings.units : 'cm' });
+        const p = new SP.Pattern(w, h, settings);
+        p.id = U.uid();
+        p.name = f.name.value.trim() || 'Imported from Excel';
+        // colours used most get the first (clearest) chart symbols
+        const cc = countColours();
+        const order = [...cc.seen.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+        const idx = new Map();
+        order.forEach(hex => { idx.set(hex, p.palette.length); p.palette.push({ brand: '', code: '', name: '', hex, symbol: SP.nextSymbol(p.palette) }); });
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+          const hex = src.colorAt(range.r1 + y, range.c1 + x);
+          if (!hex) continue;
+          const v = idx.get(hex) + 1, b = (y * w + x) * 4;
+          p.legs[b] = p.legs[b + 1] = p.legs[b + 2] = p.legs[b + 3] = v;
+        }
+        if (app.dirty) app.autosave.flush();
+        app.setPattern(p, false);
+        app.toast(`Pattern created from Excel: ${w} × ${h}, ${order.length} colours. Your previous pattern is in Open.`);
+      }, () => { d.onpaste = null; });
+      if (pasted) setTimeout(() => showPasted(pasted), 0);
     },
     drawImportResult(cv, r, settings) {
       const asp = SP.aspectOf(settings);

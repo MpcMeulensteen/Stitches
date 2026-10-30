@@ -9,7 +9,7 @@
     eraserLayer: 'all', symmetry: 'none', mark: 1, snap: 'half',
     text: 'Hello', textScale: 1, textSpacing: 1, textBold: false
   };
-  const DEFAULT_VIEW = { mode: 'blocks', grid: true, major: true, center: true, rulers: true, back: true, knots: true, marks: true, highlight: false, progress: true };
+  const DEFAULT_VIEW = { mode: 'blocks', grid: true, major: true, center: true, rulers: true, back: true, knots: true, marks: true, highlight: false, progress: true, rowsFrom: 'top', colsFrom: 'left' };
 
   const STARTER = [['310', 'dmc'], ['White', 'dmc'], ['321', 'dmc'], ['740', 'dmc'], ['444', 'dmc'], ['699', 'dmc'], ['797', 'dmc'], ['208', 'dmc'], ['3865', 'dmc'], ['801', 'dmc']];
 
@@ -202,15 +202,22 @@
     },
     saveFile() {
       const p = this.pattern;
-      U.download(U.safeFileName(p.name) + '.stitch.json', JSON.stringify(p.toJSON()), 'application/json');
-      this.toast('Project file downloaded.');
+      // the file also keeps the stitching progress and the time record from the counter
+      const rec = p.id ? SP.Storage.progress.get(p.id).catch(() => null) : Promise.resolve(null);
+      rec.then(r => {
+        U.download(U.safeFileName(p.name) + '.stitch.json', JSON.stringify(SP.Progress.toFile(p.toJSON(), r)), 'application/json');
+        this.toast(r ? 'Project file downloaded (with stitching progress and time record).' : 'Project file downloaded.');
+      });
     },
     loadFile(file) {
       file.text().then(txt => {
-        const p = SP.Pattern.fromJSON(JSON.parse(txt));
+        const json = JSON.parse(txt);
+        const p = SP.Pattern.fromJSON(json);
         p.id = U.uid();
         this.setPattern(p, false);
-        this.toast('Opened "' + p.name + '".');
+        const st = SP.Progress.fromFile(json, p);
+        if (st) SP.Storage.progress.save(st).then(() => this.loadProgress()).catch(() => {});
+        this.toast('Opened "' + p.name + '"' + (st ? ' with its stitching progress and time record.' : '.'));
       }).catch(err => alert('Could not open file: ' + err.message));
     },
 
@@ -234,6 +241,7 @@
       const v = this.viewOpts;
       return {
         mode: v.mode, grid: v.grid, major: v.major, center: v.center, rulers: v.rulers, rulerSize: RULER,
+        flipX: v.colsFrom === 'right', flipY: v.rowsFrom === 'bottom',
         back: v.back, knots: v.knots, marks: v.marks, highlight: v.highlight ? this.state.color : -1
       };
     },
@@ -251,13 +259,14 @@
       }
       if (tool && tool.overlay) tool.overlay(this, ctx, this.geo);
       if (this.state.tool !== 'select' && (this.floating || this.selection)) SP.Tools.select.overlay(this, ctx, this.geo);
-      if (this.viewOpts.rulers) {
-        const g = this.geo;
-        R.drawRulers(ctx, this.pattern, g, Object.assign(o, { rulerBg: getComputedStyle(document.documentElement).getPropertyValue('--panel').trim(),
-          rulerText: getComputedStyle(document.documentElement).getPropertyValue('--muted').trim() }),
-          Math.max(0, Math.floor(-g.ox / g.cw) - 1), Math.min(this.pattern.w, Math.ceil((this.cssW - g.ox) / g.cw) + 1),
-          Math.max(0, Math.floor(-g.oy / g.ch) - 1), Math.min(this.pattern.h, Math.ceil((this.cssH - g.oy) / g.ch) + 1),
-          0, 0, this.pattern.w, this.pattern.h);
+      if (this.viewOpts.rulers) { // row and column numbers next to the grid
+        const css = getComputedStyle(document.documentElement), h = this.hoverCell;
+        R.drawGridNumbers(ctx, this.pattern, this.geo, {
+          width: this.cssW, height: this.cssH,
+          bg: css.getPropertyValue('--panel').trim() || '#ffffff', text: css.getPropertyValue('--text').trim() || '#333',
+          line: css.getPropertyValue('--border').trim() || '#c9c5c0', accent: css.getPropertyValue('--accent').trim() || '#c2185b',
+          hover: h && this.pattern.inside(h.x, h.y) ? h : null, flipX: o.flipX, flipY: o.flipY
+        });
       }
       $('#zoomLabel').textContent = Math.round(this.view.cw / 16 * 100) + '%';
     },
@@ -362,7 +371,10 @@
         if (k === ' ') { if (!this.spaceDown) { this.spaceDown = true; this.setCursor('grab'); } e.preventDefault(); return; }
         if (ctrl) {
           const map = { z: () => (e.shiftKey ? this.redo() : this.undo()), y: () => this.redo(), c: () => this.copy(), x: () => this.cut(),
-            v: () => this.paste(), a: () => this.selectAll(), s: () => this.saveFile() };
+            a: () => this.selectAll(), s: () => this.saveFile() };
+          // Ctrl+V: let the browser's paste event through (cells copied from Excel arrive there);
+          // if it does not come, paste our own clipboard
+          if (k === 'v') { clearTimeout(this._pasteTimer); this._pasteTimer = setTimeout(() => this.paste(), 120); return; }
           if (map[k]) { e.preventDefault(); map[k](); }
           return;
         }
@@ -385,11 +397,25 @@
           case '+': case '=': this.zoomCenter(1.25); return;
           case '-': case '_': this.zoomCenter(0.8); return;
           case '0': this.fit(); return;
+          case 'Tab': e.preventDefault(); SP.UI.togglePanels(); return;
         }
         if (k === 'x') { this.state.halfDir = this.state.halfDir === '/' ? '\\' : '/'; this.saveState(); SP.UI.refreshTools(); return; }
         if (/^[1-9]$/.test(k)) { this.setColor(+k - 1); return; }
         const tl = SP.TOOL_ORDER.find(o => o[2] === k);
         if (tl && SP.UI.toolAvailable(tl[0])) this.setTool(tl[0]);
+      });
+      document.addEventListener('paste', e => {
+        clearTimeout(this._pasteTimer);
+        if (document.querySelector('dialog[open]')) return; // dialogs handle their own paste
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+        e.preventDefault();
+        const html = e.clipboardData && e.clipboardData.getData('text/html');
+        if (html && SP.Xlsx.looksLikeSheet(html)) {
+          const src = SP.Xlsx.fromHtml(html);
+          if (src && !src.empty) { SP.UI.dlgExcel(src); return; }
+        }
+        this.paste();
       });
       document.addEventListener('keyup', e => {
         if (e.key === ' ') { this.spaceDown = false; if (!this.panning) this.setCursor(this.state.tool === 'pan' ? 'grab' : 'crosshair'); }
@@ -420,6 +446,8 @@
       else if (this.selection) { const s = this.selection; this.clipboard = this.pattern.extract(s.x, s.y, s.w, s.h); }
       else { this.toast('Select an area first (S).'); return false; }
       this.clipboard.palette = this.pattern.palette.map(e => Object.assign({}, e));
+      // replace what is on the system clipboard, so Ctrl+V pastes this and not cells copied from Excel earlier
+      try { if (navigator.clipboard) navigator.clipboard.writeText('Stitch Pattern Studio selection').catch(() => {}); } catch (err) { /* not allowed */ }
       this.toast('Copied ' + this.clipboard.w + ' × ' + this.clipboard.h + '.');
       return true;
     },
@@ -523,10 +551,13 @@
     updateSelectionInfo() { this.refreshInfo(); },
 
     // ================= status =================
+    /** Column / row number as shown next to the grid (counted from the chosen side). */
+    colNo(x) { return this.viewOpts.colsFrom === 'right' ? this.pattern.w - x : x + 1; },
+    rowNo(y) { return this.viewOpts.rowsFrom === 'bottom' ? this.pattern.h - y : y + 1; },
     updateStatusPos(pt) {
       const p = this.pattern, c = pt.cell;
       if (!p.inside(c.x, c.y)) { $('#statusPos').textContent = '–'; return; }
-      let txt = `Column ${c.x + 1}, row ${c.y + 1}`;
+      let txt = `Column ${this.colNo(c.x)}, row ${this.rowNo(c.y)}`;
       const v = p.cellColor(c.x, c.y);
       if (v && p.palette[v - 1]) { const e = p.palette[v - 1]; txt += ` · ${e.brand ? e.brand + ' ' + e.code : e.hex} ${e.name}`; }
       const m = p.marks[c.y * p.w + c.x];
@@ -563,8 +594,10 @@
         const ps = SP.Progress.stats(p, this.progress);
         const pct = ps.done / Math.max(1, ps.total) * 100;
         if (ps.done) lines.push(`<b>Stitched:</b> ${ps.done} of ${ps.total} (${pct < 10 ? pct.toFixed(1) : Math.floor(pct)}%)`);
+        const tt = SP.Progress.timeTotals(this.progress.time);
+        if (tt.ms >= 1000) lines.push(`<b>Stitching time:</b> ${SP.Progress.fmtDuration(tt.ms)} in ${tt.count} session${tt.count === 1 ? '' : 's'}`);
       }
-      if (this.selection) lines.push(`<b>Selection:</b> ${this.selection.w} × ${this.selection.h} at ${this.selection.x + 1}, ${this.selection.y + 1}`);
+      if (this.selection) lines.push(`<b>Selection:</b> ${this.selection.w} × ${this.selection.h} at column ${this.colNo(this.selection.x)}, row ${this.rowNo(this.selection.y)}`);
       if (this.floating) lines.push(`<b>Pasted part:</b> ${this.floating.clip.w} × ${this.floating.clip.h} (Enter to place)`);
       $('#patternInfo').innerHTML = lines.join('<br>');
       $('#statusSize').textContent = `${p.w} × ${p.h}`;
